@@ -224,6 +224,48 @@ export const HOTKEYS = {
   removeBox: ['delete', 'backspace'],
 };
 
+/** Page copy and outbound links (index.html header is filled from these). */
+export const PAGE = {
+  title: '房間光影',
+  subtitle: '一張平光像素畫，加上 2.5D 幾何資料，就能即時打光。',
+  referenceLabel: '參考：@vux429 的 Threads 貼文',
+  referenceUrl: 'https://www.threads.com/@vux429/post/De7EVP5GFse',
+  repoLabel: 'GitHub 原始碼',
+  repoUrl: 'https://github.com/Farl/room-atmosphere-2d',
+  shortcuts: [
+    ['1–3', '預設'],
+    ['D', '日間'],
+    ['N', '夜間'],
+    ['P', '暫停動態'],
+    ['G', '幾何資料'],
+    ['B', '新增方塊'],
+    ['Delete', '刪除'],
+  ] as [string, string][],
+};
+
+/** A control in the side panel: a toggle, a slider, or one of the composite widgets. */
+export type PanelItem = ToggleKey | SliderKey | 'presets' | 'view' | 'edit';
+
+/** Side panel grouped by what the controls change. */
+export const PANEL_SECTIONS: { title: string; help?: string; items: PanelItem[] }[] = [
+  { title: '畫面', items: ['presets', 'view', 'intensity', 'aiArt'] },
+  { title: '光線', items: ['direct', 'beam', 'lamps'] },
+  { title: '空氣', items: ['dust', 'fog', 'animate'] },
+  { title: '鏡頭', items: ['softFocus', 'grain', 'chromatic'] },
+  { title: '幾何資料', help: '拖曳黃色落點改變光的方向；點選家具拖曳移動，滾輪調整高度。', items: ['debug', 'edit'] },
+];
+
+/** Amount sliders shown on the same row as their effect toggle (dimmed while it is off). */
+export const TOGGLE_AMOUNTS: Partial<Record<ToggleKey, SliderKey>> = {
+  beam: 'beamDensity',
+  dust: 'dustSpeed',
+  grain: 'grainAmount',
+  chromatic: 'chromaticAmount',
+};
+
+/** 24h sky band under the stage: gradient sampled from TIME_KEYS every `sampleStep` hours. */
+export const TIME_BAND = { sampleStep: 0.5, tickEvery: 3 };
+
 /** Debug overlay: landing-point handle size in display pixels. */
 export const OVERLAY = { handleRadius: 9, label: '直射光落點', lineColor: 'rgba(255,255,255,0.55)', accent: '#ffd25e' };
 

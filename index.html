@@ -3,16 +3,27 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Room Atmosphere 2D</title>
+    <title>房間光影 · Room Atmosphere 2D</title>
+    <meta name="description" content="一張平光像素畫，加上 2.5D 幾何資料，就能即時打光。" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="./src/style.css" />
   </head>
   <body>
-    <header id="panel"></header>
-    <main id="stage">
-      <canvas id="view"></canvas>
-      <canvas id="overlay"></canvas>
-    </main>
-    <p id="error" hidden></p>
+    <header id="header" class="header"></header>
+    <div class="workspace">
+      <main class="stage-column">
+        <div id="stage" class="stage">
+          <canvas id="view"></canvas>
+          <canvas id="overlay"></canvas>
+        </div>
+        <div id="time-band" class="time-band"></div>
+        <footer id="shortcuts" class="shortcuts"></footer>
+        <p id="error" class="error" hidden></p>
+      </main>
+      <aside id="panel" class="panel" aria-label="控制面板"></aside>
+    </div>
     <script type="module" src="./src/main.ts"></script>
   </body>
 </html>

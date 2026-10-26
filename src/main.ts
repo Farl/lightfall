@@ -44,7 +44,8 @@ function start() {
     onEdit: markDirty,
   });
   const select = (group: string | null) => (overlay.selected = group);
-  buildUi(document.querySelector('#panel')!, state, {
+  const byId = (id: string) => document.getElementById(id)!;
+  buildUi({ header: byId('header'), timeBand: byId('time-band'), panel: byId('panel'), shortcuts: byId('shortcuts') }, state, {
     addBox: () => {
       select(addBox(room, RENDER.maxBoxes));
       markDirty();

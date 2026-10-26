@@ -4,6 +4,8 @@
 
 靈感來自 [@vux429 的 Godot 橫捲貼文](https://www.threads.com/@vux429/post/De7EVP5GFse)。這裡用 WebGL2 + Canvas2D 重現同樣的思路，不用任何 3D 網格。
 
+**線上試玩：https://farl.github.io/room-atmosphere-2d/**
+
 技術拆解見 [docs/technique.md](docs/technique.md)。
 
 ## 執行
@@ -62,3 +64,7 @@ src/
 scripts/ai-repaint.mjs 用 Atlas Cloud 重繪原圖
 art/                 平光原圖與 AI 重繪結果
 ```
+
+## 授權
+
+程式碼以 [MIT License](LICENSE) 釋出。`art/ai-albedo.png` 由 AI 依本專案的平光原圖重繪而成。效果靈感來自 [@vux429 的 Threads 貼文](https://www.threads.com/@vux429/post/De7EVP5GFse)，本專案沒有使用該貼文的任何素材。

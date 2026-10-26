@@ -1,13 +1,26 @@
-/** Control panel generated from the PRESETS / TOGGLES / SLIDERS / VIEW_MODES definitions, plus hotkeys. */
-import { DAY_HOTKEY_HOUR, HOTKEYS, NIGHT_HOTKEY_HOUR, PRESET_ORDER, PRESETS, SLIDERS, TOGGLES, VIEW_MODES, type ToggleKey } from './config';
+/**
+ * Page chrome generated from config: header links, the 24h sky band under the
+ * stage, and the grouped side panel (PANEL_SECTIONS), plus keyboard shortcuts.
+ */
+import {
+  DAY_HOTKEY_HOUR,
+  HOTKEYS,
+  NIGHT_HOTKEY_HOUR,
+  PAGE,
+  PANEL_SECTIONS,
+  PRESET_ORDER,
+  PRESETS,
+  SLIDERS,
+  TIME_BAND,
+  TOGGLE_AMOUNTS,
+  TOGGLES,
+  VIEW_MODES,
+  type PanelItem,
+  type SliderKey,
+  type ToggleKey,
+} from './config';
+import { skyColorAt } from './lighting';
 import type { AppState } from './state';
-
-const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text = '') => {
-  const e = document.createElement(tag);
-  if (className) e.className = className;
-  if (text) e.textContent = text;
-  return e;
-};
 
 /** Scene editing commands the panel and hotkeys can trigger (implemented in main.ts). */
 export interface EditActions {
@@ -21,77 +34,189 @@ export interface UiHandle {
   refresh(): void;
 }
 
-export function buildUi(root: HTMLElement, state: AppState, actions: EditActions): UiHandle {
+export interface UiRoots {
+  header: HTMLElement;
+  timeBand: HTMLElement;
+  panel: HTMLElement;
+  shortcuts: HTMLElement;
+}
+
+const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text = '') => {
+  const e = document.createElement(tag);
+  if (className) e.className = className;
+  if (text) e.textContent = text;
+  return e;
+};
+
+const toggleDef = (key: ToggleKey) => TOGGLES.find((t) => t.key === key)!;
+const sliderDef = (key: SliderKey) => SLIDERS.find((s) => s.key === key)!;
+const isToggle = (item: PanelItem): item is ToggleKey => TOGGLES.some((t) => t.key === item);
+const isSlider = (item: PanelItem): item is SliderKey => SLIDERS.some((s) => s.key === item);
+
+export function buildUi(roots: UiRoots, state: AppState, actions: EditActions): UiHandle {
   const syncers: (() => void)[] = [];
   const refresh = () => syncers.forEach((s) => s());
 
-  const hint = el('div', 'hint', `區域氣氛預覽 | 1-3 切換  D 日間 / N 夜間  P 暫停動態  G 幾何資料（點選拖曳家具、滾輪抬高、B 新增、Delete 刪除）`);
-  const rowPresets = el('div', 'row');
-  const rowToggles = el('div', 'row');
-  const rowSliders = el('div', 'row');
-  root.append(hint, rowPresets, rowToggles, rowSliders);
+  /* ---------------------------------------------------------------- helpers */
 
-  const editButtons: [string, () => void][] = [
-    ['新增方塊', actions.addBox],
-    ['刪除選取', actions.removeSelected],
-    ['重設場景', actions.resetScene],
-  ];
+  const range = (key: SliderKey, className = 'range') => {
+    const def = sliderDef(key);
+    const input = el('input', className);
+    input.type = 'range';
+    // Stop the browser restoring a stale slider position on reload (state would not see it).
+    input.autocomplete = 'off';
+    Object.assign(input, { min: def.min, max: def.max, step: def.step });
+    input.setAttribute('aria-label', def.label);
+    const value = el('output', 'value');
+    input.oninput = () => {
+      state.sliders[key] = Number(input.value);
+      if (key === 'time') state.lightOverride = null;
+      value.textContent = def.format(state.sliders[key]);
+    };
+    syncers.push(() => {
+      input.value = String(state.sliders[key]);
+      value.textContent = def.format(state.sliders[key]);
+    });
+    return { input, value };
+  };
+
+  /** Single-choice button row (presets, view modes). */
+  const segmented = <K extends string>(label: string, options: { key: K; label: string }[], get: () => K, set: (k: K) => void) => {
+    const group = el('div', 'segmented');
+    group.setAttribute('role', 'radiogroup');
+    group.setAttribute('aria-label', label);
+    for (const o of options) {
+      const b = el('button', 'segment', o.label);
+      b.type = 'button';
+      b.setAttribute('role', 'radio');
+      b.onclick = () => {
+        set(o.key);
+        refresh();
+      };
+      syncers.push(() => b.setAttribute('aria-checked', String(get() === o.key)));
+      group.append(b);
+    }
+    return group;
+  };
+
+  const row = (label: string, ...controls: HTMLElement[]) => {
+    const r = el('div', 'row');
+    r.append(el('span', 'row-label', label), ...controls);
+    return r;
+  };
+
   // Editing only makes sense with the proxy wireframes visible, so it turns 幾何資料 on.
   const runEdit = (run: () => void) => {
     state.toggles.debug = true;
     run();
     refresh();
   };
-  for (const [label, run] of editButtons) {
-    const b = el('button', 'preset', label);
-    b.onclick = () => runEdit(run);
-    rowToggles.append(b);
-  }
 
-  PRESET_ORDER.forEach((key, i) => {
-    const b = el('button', 'preset', `${i + 1}  ${PRESETS[key].label}`);
+  /* ----------------------------------------------------------------- header */
+
+  const titleBlock = el('div', 'title-block');
+  titleBlock.append(el('h1', 'title', PAGE.title), el('p', 'subtitle', PAGE.subtitle));
+  const links = el('nav', 'links');
+  for (const [text, href] of [[PAGE.referenceLabel, PAGE.referenceUrl], [PAGE.repoLabel, PAGE.repoUrl]]) {
+    const a = el('a', '', text);
+    a.href = href;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    links.append(a);
+  }
+  roots.header.append(titleBlock, links);
+
+  /* --------------------------------------------------------------- time band */
+
+  const timeHead = el('div', 'time-head');
+  const { input: timeInput, value: timeValue } = range('time', 'time-range');
+  timeValue.className = 'time-value';
+  const dayNight = el('div', 'day-night');
+  for (const [label, hour] of [['日間', DAY_HOTKEY_HOUR], ['夜間', NIGHT_HOTKEY_HOUR]] as const) {
+    const b = el('button', 'chip', label);
+    b.type = 'button';
     b.onclick = () => {
-      state.preset = key;
+      setTime(hour);
       refresh();
     };
-    syncers.push(() => b.classList.toggle('active', state.preset === key));
-    rowPresets.append(b);
-  });
+    dayNight.append(b);
+  }
+  timeHead.append(el('span', 'time-label', '時間'), timeValue, dayNight);
 
-  const view = el('select', 'view');
-  for (const m of VIEW_MODES) view.append(new Option(m.label, m.key));
-  view.onchange = () => (state.view = view.value as AppState['view']);
-  syncers.push(() => (view.value = state.view));
-  rowPresets.append(labelled('檢視', view));
+  const track = el('div', 'time-track');
+  const def = sliderDef('time');
+  const stops: string[] = [];
+  for (let h = def.min; h <= def.max; h += TIME_BAND.sampleStep) {
+    stops.push(`rgb(${skyColorAt(h).join(',')}) ${((h - def.min) / (def.max - def.min)) * 100}%`);
+  }
+  track.style.setProperty('--sky', `linear-gradient(90deg, ${stops.join(',')})`);
+  const ticks = el('div', 'time-ticks');
+  for (let h = def.min; h <= def.max; h += TIME_BAND.tickEvery) ticks.append(el('span', '', String(h).padStart(2, '0')));
+  track.append(timeInput);
+  roots.timeBand.append(timeHead, track, ticks);
 
-  for (const t of TOGGLES) {
-    const input = el('input', 'switch');
-    input.type = 'checkbox';
-    input.autocomplete = 'off';
-    input.onchange = () => (state.toggles[t.key] = input.checked);
-    syncers.push(() => (input.checked = state.toggles[t.key]));
-    rowToggles.append(labelled(t.label, input));
+  /* ------------------------------------------------------------------ panel */
+
+  for (const section of PANEL_SECTIONS) {
+    const s = el('section', 'section');
+    s.append(el('h2', 'section-title', section.title));
+    if (section.help) s.append(el('p', 'help', section.help));
+    for (const item of section.items) s.append(panelItem(item));
+    roots.panel.append(s);
   }
 
-  for (const s of SLIDERS) {
-    const input = el('input');
-    input.type = 'range';
-    // Stop the browser restoring a stale slider position on reload (state would not see it).
-    input.autocomplete = 'off';
-    Object.assign(input, { min: s.min, max: s.max, step: s.step });
-    const value = el('span', 'value');
-    input.oninput = () => {
-      state.sliders[s.key] = Number(input.value);
-      if (s.key === 'time') state.lightOverride = null;
-      value.textContent = s.format(state.sliders[s.key]);
-    };
-    syncers.push(() => {
-      input.value = String(state.sliders[s.key]);
-      value.textContent = s.format(state.sliders[s.key]);
-    });
-    const wrap = labelled(s.label, input);
-    wrap.append(value);
-    (s.key === 'time' || s.key === 'intensity' ? rowPresets : rowSliders).append(wrap);
+  function panelItem(item: PanelItem): HTMLElement {
+    if (item === 'presets') return segmented('預設', PRESET_ORDER.map((k) => ({ key: k, label: PRESETS[k].label })), () => state.preset, (k) => (state.preset = k));
+    if (item === 'view') {
+      // Five options do not fit beside a label in the panel width, so the label sits above.
+      const block = el('div', 'stacked');
+      block.append(el('span', 'row-label', '檢視'), segmented('檢視', VIEW_MODES, () => state.view, (k) => (state.view = k)));
+      return block;
+    }
+    if (item === 'edit') {
+      const buttons = el('div', 'button-row');
+      for (const [label, run] of [['新增方塊', actions.addBox], ['刪除選取', actions.removeSelected], ['重設場景', actions.resetScene]] as const) {
+        const b = el('button', 'chip', label);
+        b.type = 'button';
+        b.onclick = () => runEdit(run);
+        buttons.append(b);
+      }
+      return buttons;
+    }
+    if (isSlider(item)) {
+      const { input, value } = range(item);
+      return row(sliderDef(item).label, input, value);
+    }
+    if (isToggle(item)) {
+      const t = toggleDef(item);
+      const input = el('input', 'switch');
+      input.type = 'checkbox';
+      input.autocomplete = 'off';
+      input.setAttribute('aria-label', t.label);
+      input.onchange = () => {
+        state.toggles[item] = input.checked;
+        refresh();
+      };
+      syncers.push(() => (input.checked = state.toggles[item]));
+      const r = el('label', 'row toggle-row');
+      r.append(input, el('span', 'row-label', t.label));
+      const amount = TOGGLE_AMOUNTS[item];
+      if (amount) {
+        const { input: slider, value } = range(amount);
+        syncers.push(() => r.classList.toggle('is-off', !state.toggles[item]));
+        r.append(slider, value);
+      }
+      return r;
+    }
+    throw new Error(`Unknown panel item ${item}`);
+  }
+
+  /* ---------------------------------------------------------------- hotkeys */
+
+  for (const [key, label] of PAGE.shortcuts) {
+    const k = el('span', 'shortcut');
+    k.append(el('kbd', '', key), document.createTextNode(label));
+    roots.shortcuts.append(k);
   }
 
   const setTime = (hour: number) => {
@@ -101,6 +226,7 @@ export function buildUi(root: HTMLElement, state: AppState, actions: EditActions
   const toggle = (key: ToggleKey) => (state.toggles[key] = !state.toggles[key]);
 
   window.addEventListener('keydown', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.target instanceof HTMLInputElement && e.target.type !== 'checkbox' && e.target.type !== 'range') return;
     const k = e.key.toLowerCase();
     const presetIndex = HOTKEYS.presets.indexOf(k);
@@ -118,10 +244,3 @@ export function buildUi(root: HTMLElement, state: AppState, actions: EditActions
   refresh();
   return { refresh };
 }
-
-function labelled(text: string, control: HTMLElement) {
-  const wrap = el('label', 'control');
-  wrap.append(el('span', 'label', text), control);
-  return wrap;
-}
-

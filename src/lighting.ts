@@ -43,6 +43,12 @@ function sampleKeys(hour: number): TimeKey {
   };
 }
 
+/** Display-space (sRGB 0..255) sky color at an hour, for UI swatches like the time band. */
+export function skyColorAt(hour: number): Vec3 {
+  const k = sampleKeys(hour);
+  return lerp3(k.skyTop, k.skyBottom, 0.5).map((c) => Math.round(255 * Math.pow(clamp(c, 0, 1), 1 / 2.2))) as Vec3;
+}
+
 /** Sun by day, moon by night; both arc across the window from back-left to front-left. */
 export function celestialDirection(hour: number): Vec3 {
   const h = ((hour % 24) + 24) % 24;
