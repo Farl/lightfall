@@ -26,9 +26,17 @@
 
 * { box-sizing: border-box; }
 
+/*
+ * One-screen layout: the page never scrolls. Header and workspace fill the
+ * viewport, the stage scales to fit its column, and only the panel scrolls.
+ */
 body {
   margin: 0;
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
@@ -49,8 +57,9 @@ a:hover { text-decoration-color: var(--accent); }
   align-items: baseline;
   justify-content: space-between;
   gap: 8px 24px;
-  padding: 18px var(--gutter) 14px;
+  padding: 14px var(--gutter) 12px;
   border-bottom: 1px solid var(--line);
+  flex: none;
 }
 .title-block { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; }
 .title { margin: 0; font-family: var(--font-serif); font-size: 26px; font-weight: 700; letter-spacing: 0.04em; }
@@ -60,18 +69,35 @@ a:hover { text-decoration-color: var(--accent); }
 /* --------------------------------------------------------------- workspace */
 
 .workspace {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--panel-width);
-  align-items: start;
 }
 
-.stage-column { padding: var(--gutter); min-width: 0; }
+.stage-column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--gutter);
+}
+.stage-column > :not(.stage-fit) { flex: none; }
 
-.stage { position: relative; }
+/* Size container for the stage: the 16:9 frame takes the largest size that fits both ways. */
+.stage-fit {
+  flex: 1;
+  min-height: 0;
+  container-type: size;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.stage { position: relative; width: min(100cqw, 100cqh * 16 / 9); aspect-ratio: 16 / 9; }
 .stage canvas {
   display: block;
   width: 100%;
-  aspect-ratio: 16 / 9;
+  height: 100%;
   border-radius: var(--radius-stage);
   image-rendering: pixelated;
 }
@@ -118,7 +144,7 @@ a:hover { text-decoration-color: var(--accent); }
 
 .time-ticks { display: flex; justify-content: space-between; margin-top: 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 
-.shortcuts { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 18px; color: var(--muted); font-size: 12px; }
+.shortcuts { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 14px; color: var(--muted); font-size: 12px; }
 .shortcut { display: inline-flex; align-items: center; gap: 6px; }
 kbd {
   font-family: var(--font-sans);
@@ -137,7 +163,9 @@ kbd {
 .panel {
   background: var(--panel);
   border-left: 1px solid var(--line);
-  min-height: calc(100vh - 62px);
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 4px 0 24px;
 }
 
@@ -227,11 +255,27 @@ kbd {
 
 /* ------------------------------------------------------------------- narrow */
 
+/* Stacked: full-width stage on top, the panel scrolls in the remaining height. */
 @media (max-width: 900px) {
   :root { --gutter: 16px; }
-  .workspace { grid-template-columns: minmax(0, 1fr); }
-  .panel { border-left: 0; border-top: 1px solid var(--line); min-height: 0; }
+  .header { padding-top: 10px; padding-bottom: 8px; }
+  .title { font-size: 22px; }
+  .subtitle { display: none; }
+  .workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .stage-column { padding-bottom: 12px; }
+  .stage-fit { flex: none; container-type: normal; }
+  .stage { width: 100%; }
+  .time-band { margin-top: 10px; }
+  .panel { border-left: 0; border-top: 1px solid var(--line); }
   .shortcuts { display: none; }
+}
+
+/* Too short to stack stage + panel in one screen (phone in landscape): fall back to page scroll.
+   Media queries cannot read custom properties, so the 900px / 600px breakpoints live here. */
+@media (max-width: 900px) and (max-height: 600px) {
+  body { height: auto; overflow: visible; }
+  .workspace { display: block; }
+  .panel { overflow: visible; }
 }
 
 @media (prefers-reduced-motion: reduce) {
