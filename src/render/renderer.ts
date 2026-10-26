@@ -44,18 +44,16 @@ export class Renderer {
   private blurA: RenderTarget;
   private blurB: RenderTarget;
   private staticUniforms: Record<string, number | number[]>;
+  /** Uniforms derived from the (editable) room data; refreshed by setScene. */
+  private sceneUniforms: Record<string, number | number[]> = {};
 
-  constructor(canvas: HTMLCanvasElement, layers: SceneLayers, private room: RoomData) {
+  constructor(canvas: HTMLCanvasElement, layers: SceneLayers, room: RoomData) {
     canvas.width = this.outputSize.width;
     canvas.height = this.outputSize.height;
     const gl = canvas.getContext('webgl2', { antialias: false, premultipliedAlpha: false });
     if (!gl) throw new Error('WebGL2 is not available');
     this.gl = gl;
     const hdr = !!gl.getExtension('EXT_color_buffer_float');
-
-    if (room.panes.length > RENDER.maxPanes || room.boxes.length > RENDER.maxBoxes || room.lamps.length > RENDER.maxLamps) {
-      throw new Error('Room data exceeds RENDER.max* shader array sizes');
-    }
 
     this.lighting = new Pass(gl, withDefines(lightingSrc));
     this.blur = new Pass(gl, blurSrc);
@@ -68,10 +66,6 @@ export class Renderer {
       emissive: createTexture(gl, gl.NEAREST),
       dust: createTexture(gl, gl.NEAREST),
     };
-    uploadCanvas(gl, this.tex.albedo, layers.albedo.canvas);
-    uploadCanvas(gl, this.tex.depth, layers.depth.canvas);
-    uploadCanvas(gl, this.tex.normal, layers.normal.canvas);
-    uploadCanvas(gl, this.tex.emissive, layers.emissive.canvas);
 
     this.lit = createTarget(gl, SCENE_RES.width, SCENE_RES.height, gl.NEAREST, hdr);
     const bw = Math.round(SCENE_RES.width / RENDER.blurDownscale);
@@ -79,7 +73,6 @@ export class Renderer {
     this.blurA = createTarget(gl, bw, bh, gl.LINEAR, hdr);
     this.blurB = createTarget(gl, bw, bh, gl.LINEAR, hdr);
 
-    const panes = room.panes;
     this.staticUniforms = {
       uRes: [SCENE_RES.width, SCENE_RES.height],
       uCenter: [...SCENE_CENTER],
@@ -90,15 +83,6 @@ export class Renderer {
       uShadowSamples: RENDER.shadowSamples,
       uNormalBias: RENDER.normalBias,
       uBeamSteps: RENDER.beamSteps,
-      uWindowX: room.windowX,
-      uPaneCount: panes.length,
-      uPanes: flat(panes, (p) => [p.zMin, p.yMin, p.zMax, p.yMax]),
-      uSkyRange: [Math.min(...panes.map((p) => p.yMin)), Math.max(...panes.map((p) => p.yMax))],
-      uBoxCount: room.boxes.length,
-      uBoxMin: flat(room.boxes, (b) => b.min),
-      uBoxMax: flat(room.boxes, (b) => b.max),
-      uLampCount: room.lamps.length,
-      uLampPos: flat(room.lamps, (l) => l),
       uLampFalloff: LAMP_LIGHT.falloff,
       uTvFlicker: TV_LIGHT.flickerSpeed,
       uShaftScale: ATMOSPHERE.shaftScale,
@@ -108,6 +92,32 @@ export class Renderer {
       uFogDrift: ATMOSPHERE.fogDrift,
       uDustLitGain: ATMOSPHERE.dustLitGain,
       uDustAmbientGain: ATMOSPHERE.dustAmbientGain,
+    };
+    this.setScene(layers, room);
+  }
+
+  /** Upload the painted layers and the proxy geometry. Call again after the room is edited. */
+  setScene(layers: SceneLayers, room: RoomData) {
+    if (room.panes.length > RENDER.maxPanes || room.boxes.length > RENDER.maxBoxes || room.lamps.length > RENDER.maxLamps) {
+      throw new Error('Room data exceeds RENDER.max* shader array sizes');
+    }
+    const gl = this.gl;
+    uploadCanvas(gl, this.tex.albedo, layers.albedo.canvas);
+    uploadCanvas(gl, this.tex.depth, layers.depth.canvas);
+    uploadCanvas(gl, this.tex.normal, layers.normal.canvas);
+    uploadCanvas(gl, this.tex.emissive, layers.emissive.canvas);
+
+    const panes = room.panes;
+    this.sceneUniforms = {
+      uWindowX: room.windowX,
+      uPaneCount: panes.length,
+      uPanes: flat(panes, (p) => [p.zMin, p.yMin, p.zMax, p.yMax]),
+      uSkyRange: [Math.min(...panes.map((p) => p.yMin)), Math.max(...panes.map((p) => p.yMax))],
+      uBoxCount: room.boxes.length,
+      uBoxMin: flat(room.boxes, (b) => b.min),
+      uBoxMax: flat(room.boxes, (b) => b.max),
+      uLampCount: room.lamps.length,
+      uLampPos: flat(room.lamps, (l) => l),
     };
   }
 
@@ -123,6 +133,7 @@ export class Renderer {
     if (view !== 'albedo') {
       this.lighting.run(this.lit, SCENE_RES, {
         ...this.staticUniforms,
+        ...this.sceneUniforms,
         uAlbedo: this.tex.albedo,
         uDepth: this.tex.depth,
         uNormal: this.tex.normal,

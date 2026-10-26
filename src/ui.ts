@@ -9,20 +9,44 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text 
   return e;
 };
 
+/** Scene editing commands the panel and hotkeys can trigger (implemented in main.ts). */
+export interface EditActions {
+  addBox(): void;
+  removeSelected(): void;
+  resetScene(): void;
+}
+
 export interface UiHandle {
   /** Re-sync every control from state (after hotkeys or drag). */
   refresh(): void;
 }
 
-export function buildUi(root: HTMLElement, state: AppState): UiHandle {
+export function buildUi(root: HTMLElement, state: AppState, actions: EditActions): UiHandle {
   const syncers: (() => void)[] = [];
   const refresh = () => syncers.forEach((s) => s());
 
-  const hint = el('div', 'hint', `區域氣氛預覽 | 1-3 切換  D 日間 / N 夜間  P 暫停動態  G 幾何資料`);
+  const hint = el('div', 'hint', `區域氣氛預覽 | 1-3 切換  D 日間 / N 夜間  P 暫停動態  G 幾何資料（點選拖曳家具、滾輪抬高、B 新增、Delete 刪除）`);
   const rowPresets = el('div', 'row');
   const rowToggles = el('div', 'row');
   const rowSliders = el('div', 'row');
   root.append(hint, rowPresets, rowToggles, rowSliders);
+
+  const editButtons: [string, () => void][] = [
+    ['新增方塊', actions.addBox],
+    ['刪除選取', actions.removeSelected],
+    ['重設場景', actions.resetScene],
+  ];
+  // Editing only makes sense with the proxy wireframes visible, so it turns 幾何資料 on.
+  const runEdit = (run: () => void) => {
+    state.toggles.debug = true;
+    run();
+    refresh();
+  };
+  for (const [label, run] of editButtons) {
+    const b = el('button', 'preset', label);
+    b.onclick = () => runEdit(run);
+    rowToggles.append(b);
+  }
 
   PRESET_ORDER.forEach((key, i) => {
     const b = el('button', 'preset', `${i + 1}  ${PRESETS[key].label}`);
@@ -85,6 +109,8 @@ export function buildUi(root: HTMLElement, state: AppState): UiHandle {
     else if (k === HOTKEYS.night) setTime(NIGHT_HOTKEY_HOUR);
     else if (k === HOTKEYS.pause) toggle('animate');
     else if (k === HOTKEYS.debug) toggle('debug');
+    else if (k === HOTKEYS.addBox) runEdit(actions.addBox);
+    else if (HOTKEYS.removeBox.includes(k)) runEdit(actions.removeSelected);
     else return;
     refresh();
   });

@@ -1,21 +1,32 @@
 /**
- * 幾何資料 overlay: draws the authored proxy data over the image and owns the
- * draggable 直射光落點 (direct light landing point) handle.
+ * 幾何資料 overlay: draws the authored proxy data over the image, owns the
+ * draggable 直射光落點 (direct light landing point) handle, and edits the proxy
+ * geometry (click to select, drag to move along the floor, wheel to lift).
  */
-import { OUTPUT_SCALE, OVERLAY, SCENE_RES } from './config';
+import { EDITOR, OUTPUT_SCALE, OVERLAY, SCENE_RES } from './config';
 import { pointOnFloor, project } from './camera';
 import { directionToLanding, landingPoint } from './lighting';
 import { add, scale, type Vec2, type Vec3 } from './math';
 import { windowCenter, type RoomData } from './scene/roomData';
+import { groupOf, liftDelta, moveGroup, pickGroup } from './scene/editing';
+
+export interface OverlayCallbacks {
+  onLightDrag(toLight: Vec3): void;
+  /** Proxy geometry changed; layers and GPU data need a rebuild. */
+  onEdit(): void;
+}
+
+type Drag = { kind: 'light' } | { kind: 'group'; group: string; last: Vec3 };
 
 const DASH = [4, 4];
 
 export class DebugOverlay {
   private ctx: CanvasRenderingContext2D;
-  private dragging = false;
+  private drag: Drag | null = null;
   private handle: Vec2 | null = null;
+  selected: string | null = null;
 
-  constructor(private canvas: HTMLCanvasElement, private room: RoomData, onDrag: (toLight: Vec3) => void) {
+  constructor(private canvas: HTMLCanvasElement, private room: RoomData, cb: OverlayCallbacks) {
     canvas.width = SCENE_RES.width * OUTPUT_SCALE;
     canvas.height = SCENE_RES.height * OUTPUT_SCALE;
     this.ctx = canvas.getContext('2d')!;
@@ -25,21 +36,38 @@ export class DebugOverlay {
       return [((e.clientX - r.left) / r.width) * SCENE_RES.width, ((e.clientY - r.top) / r.height) * SCENE_RES.height];
     };
     canvas.addEventListener('pointerdown', (e) => {
-      if (!this.handle) return;
       const [sx, sy] = toScene(e);
-      const dx = (sx - this.handle[0]) * OUTPUT_SCALE;
-      const dy = (sy - this.handle[1]) * OUTPUT_SCALE;
-      if (Math.hypot(dx, dy) > OVERLAY.handleRadius * 2) return;
-      this.dragging = true;
-      canvas.setPointerCapture(e.pointerId);
+      const onHandle = this.handle && Math.hypot(sx - this.handle[0], sy - this.handle[1]) * OUTPUT_SCALE <= OVERLAY.handleRadius * 2;
+      if (onHandle) {
+        this.drag = { kind: 'light' };
+      } else {
+        this.selected = pickGroup(this.room, sx, sy);
+        const start = pointOnFloor(sx, sy);
+        this.drag = this.selected && start ? { kind: 'group', group: this.selected, last: start } : null;
+      }
+      if (this.drag) canvas.setPointerCapture(e.pointerId);
     });
     canvas.addEventListener('pointermove', (e) => {
-      if (!this.dragging) return;
+      if (!this.drag) return;
       const p = pointOnFloor(...toScene(e));
-      // Keep the landing point inside the room, in front of the window wall.
-      if (p && p[0] > room.windowX + 0.2) onDrag(directionToLanding(room, p));
+      if (!p) return;
+      if (this.drag.kind === 'light') {
+        // Keep the landing point inside the room, in front of the window wall.
+        if (p[0] > room.windowX + 0.2) cb.onLightDrag(directionToLanding(room, p));
+        return;
+      }
+      // Floor-plane delta: objects slide along x/z and keep their height.
+      moveGroup(this.room, this.drag.group, [p[0] - this.drag.last[0], 0, p[2] - this.drag.last[2]]);
+      this.drag.last = p;
+      cb.onEdit();
     });
-    const stop = () => (this.dragging = false);
+    canvas.addEventListener('wheel', (e) => {
+      if (!this.selected) return;
+      e.preventDefault();
+      moveGroup(this.room, this.selected, liftDelta(-Math.sign(e.deltaY)));
+      cb.onEdit();
+    }, { passive: false });
+    const stop = () => (this.drag = null);
     canvas.addEventListener('pointerup', stop);
     canvas.addEventListener('pointercancel', stop);
   }
@@ -67,13 +95,17 @@ export class DebugOverlay {
     ctx.strokeStyle = OVERLAY.lineColor;
     ctx.setLineDash([]);
 
-    // Proxy boxes as wireframes.
+    // Proxy boxes as wireframes; the selected group is highlighted.
     for (const b of this.room.boxes) {
+      const isSelected = groupOf(b) === this.selected;
+      ctx.strokeStyle = isSelected ? EDITOR.selectedColor : OVERLAY.lineColor;
+      ctx.lineWidth = isSelected ? 2 : 1;
       const [x0, y0, z0] = b.min;
       const [x1, y1, z1] = b.max;
       const c: Vec3[] = [[x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0], [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]];
       for (const [a, e] of [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]]) line(c[a], c[e]);
     }
+    ctx.lineWidth = 1;
 
     // Window panes and the rays from their corners down to the floor.
     ctx.strokeStyle = OVERLAY.accent;

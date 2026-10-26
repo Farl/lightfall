@@ -49,6 +49,8 @@ export interface BoxDef {
   color: string;
   /** Invisible shadow proxy (e.g. plant foliage drawn as blobs). */
   hidden?: boolean;
+  /** Pieces sharing a group move together when edited. Defaults to `name`. */
+  group?: string;
   /** Rects (x0, y0, x1, y1) painted on the camera-facing face. */
   frontDecals?: { rect: [number, number, number, number]; color: string; emissive?: Emissive }[];
 }
@@ -59,6 +61,7 @@ export interface BlobDef {
   color: string;
   /** Painted foliage has no real normal; this fake one decides how much sun it catches. */
   normal: Vec3;
+  group?: string;
 }
 
 /** Open glass of the window on the left wall, in (z, y). The light source shines only through these. */
@@ -186,40 +189,41 @@ export const ROOM_DATA: RoomData = {
   ],
   boxes: [
     // Plant under the front half of the window: stand, pot, and an invisible foliage proxy for the leaf shadow.
-    box('plantStand', [-3.85, 0, 1.45], [-3.5, 0.5, 1.8], PALETTE.woodDark),
-    box('pot', [-3.8, 0.5, 1.5], [-3.55, 0.75, 1.75], '#e9e2d6'),
-    box('foliage', [-3.98, 0.85, 1.3], [-3.3, 1.5, 1.95], '#000000', { hidden: true }),
+    box('plantStand', [-3.85, 0, 1.45], [-3.5, 0.5, 1.8], PALETTE.woodDark, { group: 'plant' }),
+    box('pot', [-3.8, 0.5, 1.5], [-3.55, 0.75, 1.75], '#e9e2d6', { group: 'plant' }),
+    box('foliage', [-3.98, 0.85, 1.3], [-3.3, 1.5, 1.95], '#000000', { hidden: true, group: 'plant' }),
     // Low TV stand by the window; the beam grazes it and throws its shadow across the patch.
-    box('tvStand', [-3.8, 0, 2.0], [-2.95, 0.36, 2.75], '#9b7056'),
+    box('tvStand', [-3.8, 0, 2.0], [-2.95, 0.36, 2.75], '#9b7056', { group: 'tv' }),
     box('tv', [-3.65, 0.36, 2.1], [-3.1, 0.9, 2.65], '#4c4745', {
+      group: 'tv',
       frontDecals: [
         { rect: [-3.57, 0.45, -3.25, 0.82], color: '#3a3836' },
         { rect: [-3.21, 0.48, -3.15, 0.8], color: '#2f2b2a', emissive: Emissive.Tv },
       ],
     }),
     // Coffee table beside the rug, out of the patch so the patch stays visible from this low camera.
-    box('tableTop', [-0.9, 0.3, 2.9], [0.2, 0.36, 3.4], '#b8835f'),
-    box('tableLeg', [-0.45, 0, 3.07], [-0.25, 0.3, 3.23], PALETTE.woodDark),
+    box('tableTop', [-0.9, 0.3, 2.9], [0.2, 0.36, 3.4], '#b8835f', { group: 'table' }),
+    box('tableLeg', [-0.45, 0, 3.07], [-0.25, 0.3, 3.23], PALETTE.woodDark, { group: 'table' }),
     // Sofa against the back wall.
-    box('sofaSeat', [-2.9, 0, 4.25], [-0.9, 0.4, 4.95], PALETTE.sofa),
-    box('sofaBack', [-2.9, 0.4, 4.7], [-0.9, 0.85, 4.95], PALETTE.sofa),
-    box('sofaArmL', [-2.9, 0.4, 4.25], [-2.68, 0.58, 4.7], PALETTE.sofa),
-    box('sofaArmR', [-1.12, 0.4, 4.25], [-0.9, 0.58, 4.7], PALETTE.sofa),
-    box('cushion', [-2.3, 0.46, 4.58], [-1.5, 0.76, 4.7], PALETTE.cushion),
+    box('sofaSeat', [-2.9, 0, 4.25], [-0.9, 0.4, 4.95], PALETTE.sofa, { group: 'sofa' }),
+    box('sofaBack', [-2.9, 0.4, 4.7], [-0.9, 0.85, 4.95], PALETTE.sofa, { group: 'sofa' }),
+    box('sofaArmL', [-2.9, 0.4, 4.25], [-2.68, 0.58, 4.7], PALETTE.sofa, { group: 'sofa' }),
+    box('sofaArmR', [-1.12, 0.4, 4.25], [-0.9, 0.58, 4.7], PALETTE.sofa, { group: 'sofa' }),
+    box('cushion', [-2.3, 0.46, 4.58], [-1.5, 0.76, 4.7], PALETTE.cushion, { group: 'sofa' }),
     // Side table, books, coat rack.
-    box('sideTable', [-0.7, 0, 4.4], [-0.1, 0.52, 4.95], PALETTE.wood, { frontDecals: [{ rect: [-0.62, 0.26, -0.18, 0.29], color: '#8c6448' }] }),
-    box('books', [-0.6, 0.52, 4.55], [-0.36, 0.74, 4.75], '#6aa06a'),
+    box('sideTable', [-0.7, 0, 4.4], [-0.1, 0.52, 4.95], PALETTE.wood, { group: 'sideTable', frontDecals: [{ rect: [-0.62, 0.26, -0.18, 0.29], color: '#8c6448' }] }),
+    box('books', [-0.6, 0.52, 4.55], [-0.36, 0.74, 4.75], '#6aa06a', { group: 'sideTable' }),
     box('coatRack', [0.08, 0, 4.4], [0.15, 1.55, 4.47], PALETTE.woodDark),
     // Low cabinet with a vase, shoe cabinet by the entrance.
-    box('cabinet', [1.5, 0, 4.55], [2.4, 0.72, 4.95], '#c8a27e', { frontDecals: [{ rect: [1.93, 0.08, 1.97, 0.64], color: '#9e7a5a' }] }),
-    box('vase', [1.88, 0.72, 4.68], [2.02, 1.02, 4.82], '#d9744f'),
+    box('cabinet', [1.5, 0, 4.55], [2.4, 0.72, 4.95], '#c8a27e', { group: 'cabinet', frontDecals: [{ rect: [1.93, 0.08, 1.97, 0.64], color: '#9e7a5a' }] }),
+    box('vase', [1.88, 0.72, 4.68], [2.02, 1.02, 4.82], '#d9744f', { group: 'cabinet' }),
     box('shoeCabinet', [3.25, 0, 3.2], [3.98, 0.95, 4.9], '#e8dccb'),
   ],
   blobs: [
-    { center: [-3.68, 1.0, 1.62], radius: 0.3, color: '#4f8f4a', normal: [0.3, 0.6, -0.74] },
-    { center: [-3.45, 1.2, 1.5], radius: 0.22, color: '#5fa257', normal: [0.5, 0.6, -0.62] },
-    { center: [-3.85, 1.25, 1.75], radius: 0.25, color: '#3f7c3f', normal: [0.2, 0.7, -0.68] },
-    { center: [-3.6, 1.36, 1.72], radius: 0.17, color: '#68ab5e', normal: [0.4, 0.8, -0.45] },
+    { center: [-3.68, 1.0, 1.62], radius: 0.3, color: '#4f8f4a', normal: [0.3, 0.6, -0.74], group: 'plant' },
+    { center: [-3.45, 1.2, 1.5], radius: 0.22, color: '#5fa257', normal: [0.5, 0.6, -0.62], group: 'plant' },
+    { center: [-3.85, 1.25, 1.75], radius: 0.25, color: '#3f7c3f', normal: [0.2, 0.7, -0.68], group: 'plant' },
+    { center: [-3.6, 1.36, 1.72], radius: 0.17, color: '#68ab5e', normal: [0.4, 0.8, -0.45], group: 'plant' },
   ],
   windowX: -HALF_W,
   panes: windowPanes(),

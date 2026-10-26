@@ -219,7 +219,25 @@ export const HOTKEYS = {
   night: 'n',
   pause: 'p',
   debug: 'g',
+  addBox: 'b',
+  removeBox: ['delete', 'backspace'],
 };
 
 /** Debug overlay: landing-point handle size in display pixels. */
 export const OVERLAY = { handleRadius: 9, label: '直射光落點', lineColor: 'rgba(255,255,255,0.55)', accent: '#ffd25e' };
+
+/* ----------------------------------------------------------------- editor */
+
+/** Interactive proxy editing (幾何資料 mode): drag to move, wheel to lift, add/remove boxes. */
+export const EDITOR = {
+  /** Size of a box added with the 新增方塊 button, in world units. */
+  newBoxSize: [0.6, 0.9, 0.6] as Vec3,
+  /** Where new boxes appear (x, z on the floor): the edge of the morning patch, clear of the landing handle. */
+  newBoxSpawn: [-1.3, 3.3] as [number, number],
+  newBoxColors: ['#7f9cc4', '#d6a35c', '#9c7bb5', '#6fae8f'],
+  /** World units per wheel notch when lifting a group. */
+  liftStep: 0.05,
+  /** Keep groups this far from the walls. */
+  wallMargin: 0.02,
+  selectedColor: '#5ec8ff',
+};
