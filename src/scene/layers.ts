@@ -46,7 +46,11 @@ export class SceneLayers {
   /** CPU copy of the depth layer, used to occlude dust particles. */
   private depthPixels: Uint8ClampedArray | null = null;
 
-  build(room: RoomData) {
+  /**
+   * @param painting optional base painting (e.g. the AI repaint) that replaces the flat albedo.
+   *   It must share the proxy's layout; boxes flagged `overpaint` are painted on top of it.
+   */
+  build(room: RoomData, painting: CanvasImageSource | null = null) {
     for (const layer of [this.albedo, this.depth, this.normal, this.emissive]) layer.ctx.clearRect(0, 0, SCENE_RES.width, SCENE_RES.height);
 
     for (const plane of SHELL_ORDER) {
@@ -62,6 +66,13 @@ export class SceneLayers {
       ...room.blobs.map((b) => ({ key: b.center[2] - b.radius, draw: () => this.blob(b.center, b.radius, b.color, b.normal) })),
     ];
     drawables.sort((a, b) => b.key - a.key).forEach((d) => d.draw());
+
+    if (painting) {
+      const ctx = this.albedo.ctx;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(painting, 0, 0, SCENE_RES.width, SCENE_RES.height);
+      for (const b of room.boxes) if (b.overpaint && !b.hidden) this.box(b, true);
+    }
 
     this.depthPixels = this.depth.ctx.getImageData(0, 0, SCENE_RES.width, SCENE_RES.height).data;
   }
@@ -91,7 +102,8 @@ export class SceneLayers {
   }
 
   /** Visible faces of an axis-aligned box, back faces culled against the camera. */
-  private box(b: BoxDef) {
+  /** @param albedoOnly repaint just the color layer (G-buffer already holds this box). */
+  private box(b: BoxDef, albedoOnly = false) {
     const [x0, y0, z0] = b.min;
     const [x1, y1, z1] = b.max;
     const faces: { pts: Vec3[]; n: Vec3; shade: number }[] = [];
@@ -101,10 +113,10 @@ export class SceneLayers {
     if (CAMERA.x > x1) faces.push({ pts: [[x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]], n: [1, 0, 0], shade: FACE_SHADE.side });
     faces.push({ pts: [[x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0]], n: [0, 0, -1], shade: FACE_SHADE.front });
 
-    for (const f of faces) this.fillPolygon(f.pts, shadeHex(b.color, f.shade), f.n, Emissive.None);
+    for (const f of faces) this.fillPolygon(f.pts, shadeHex(b.color, f.shade), f.n, Emissive.None, albedoOnly);
     for (const d of b.frontDecals ?? []) {
       const [dx0, dy0, dx1, dy1] = d.rect;
-      this.fillPolygon([[dx0, dy0, z0], [dx1, dy0, z0], [dx1, dy1, z0], [dx0, dy1, z0]], d.color, [0, 0, -1], d.emissive ?? Emissive.None);
+      this.fillPolygon([[dx0, dy0, z0], [dx1, dy0, z0], [dx1, dy1, z0], [dx0, dy1, z0]], d.color, [0, 0, -1], d.emissive ?? Emissive.None, albedoOnly);
     }
   }
 
@@ -126,7 +138,7 @@ export class SceneLayers {
 
   /* ------------------------------------------------------------------- core */
 
-  private fillPolygon(world: Vec3[], color: string, normal: Vec3, emissive: Emissive) {
+  private fillPolygon(world: Vec3[], color: string, normal: Vec3, emissive: Emissive, albedoOnly = false) {
     const screen = world.map(project);
     const trace = (ctx: CanvasRenderingContext2D) => {
       ctx.beginPath();
@@ -137,6 +149,7 @@ export class SceneLayers {
 
     this.albedo.ctx.fillStyle = color;
     trace(this.albedo.ctx);
+    if (albedoOnly) return;
 
     this.depth.ctx.fillStyle = affineDepthStyle(this.depth.ctx, screen, world.map(depthCode));
     trace(this.depth.ctx);

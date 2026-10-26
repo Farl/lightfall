@@ -51,6 +51,8 @@ export interface BoxDef {
   hidden?: boolean;
   /** Pieces sharing a group move together when edited. Defaults to `name`. */
   group?: string;
+  /** Painted even over an external base painting (boxes added at runtime are not in the AI art). */
+  overpaint?: boolean;
   /** Rects (x0, y0, x1, y1) painted on the camera-facing face. */
   frontDecals?: { rect: [number, number, number, number]; color: string; emissive?: Emissive }[];
 }

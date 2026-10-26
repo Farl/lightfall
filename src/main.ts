@@ -2,7 +2,7 @@
  * Room Atmosphere 2D — a flat pixel-art room relit with fake 2.5D lighting.
  * See docs/technique.md for how the pieces fit together.
  */
-import { RENDER } from './config';
+import { ART, RENDER } from './config';
 import { DustField } from './dust';
 import { lightingAt } from './lighting';
 import { DebugOverlay } from './overlay';
@@ -18,16 +18,26 @@ const MAX_FRAME_DT = 0.1;
 
 function start() {
   const state = createState();
+  // Rebuilds are batched to one per frame however many pointer events arrive.
+  let sceneDirty = false;
+  const markDirty = () => (sceneDirty = true);
   // Working copy: editing mutates this, ROOM_DATA stays the pristine source for 重設場景.
   const room = structuredClone(ROOM_DATA);
   const layers = new SceneLayers();
   layers.build(room);
 
+  // The AI repaint loads asynchronously; until then (or with AI 原圖 off) the flat painting shows.
+  const aiPainting = new Image();
+  let aiReady = false;
+  aiPainting.onload = () => {
+    aiReady = true;
+    markDirty();
+  };
+  aiPainting.src = ART.aiAlbedo;
+  let builtWithAi = false;
+
   const renderer = new Renderer(document.querySelector<HTMLCanvasElement>('#view')!, layers, room);
   const dust = new DustField();
-  // Rebuilds are batched to one per frame however many pointer events arrive.
-  let sceneDirty = false;
-  const markDirty = () => (sceneDirty = true);
 
   const overlay = new DebugOverlay(document.querySelector<HTMLCanvasElement>('#overlay')!, room, {
     onLightDrag: (toLight) => (state.lightOverride = toLight),
@@ -61,8 +71,10 @@ function start() {
     last = now;
     if (state.toggles.animate) state.clock += dt;
 
-    if (sceneDirty) {
-      layers.build(room);
+    const useAi = state.toggles.aiArt && aiReady;
+    if (sceneDirty || useAi !== builtWithAi) {
+      layers.build(room, useAi ? aiPainting : null);
+      builtWithAi = useAi;
       renderer.setScene(layers, room);
       sceneDirty = false;
     }

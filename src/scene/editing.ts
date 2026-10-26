@@ -77,6 +77,7 @@ export function addBox(room: RoomData, maxBoxes: number): string | null {
     min: [x - w / 2, 0, z - dpt / 2],
     max: [x + w / 2, h, z + dpt / 2],
     color: EDITOR.newBoxColors[(addedCount - 1) % EDITOR.newBoxColors.length],
+    overpaint: true,
   });
   return name;
 }

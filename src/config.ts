@@ -169,11 +169,12 @@ export const PRESET_ORDER: PresetKey[] = ['original', 'soft', 'cinema'];
 
 /* --------------------------------------------------------------------- UI */
 
-export type ToggleKey = 'direct' | 'beam' | 'dust' | 'fog' | 'lamps' | 'softFocus' | 'grain' | 'chromatic' | 'animate' | 'debug';
+export type ToggleKey = 'aiArt' | 'direct' | 'beam' | 'dust' | 'fog' | 'lamps' | 'softFocus' | 'grain' | 'chromatic' | 'animate' | 'debug';
 export type SliderKey = 'time' | 'intensity' | 'beamDensity' | 'grainAmount' | 'chromaticAmount' | 'dustSpeed';
 export type ViewMode = 'final' | 'albedo' | 'depth' | 'normal' | 'direct';
 
 export const TOGGLES: { key: ToggleKey; label: string; initial: boolean }[] = [
+  { key: 'aiArt', label: 'AI 原圖', initial: true },
   { key: 'direct', label: '直射光', initial: true },
   { key: 'beam', label: '光束', initial: true },
   { key: 'dust', label: '浮塵', initial: true },
@@ -225,6 +226,14 @@ export const HOTKEYS = {
 
 /** Debug overlay: landing-point handle size in display pixels. */
 export const OVERLAY = { handleRadius: 9, label: '直射光落點', lineColor: 'rgba(255,255,255,0.55)', accent: '#ffd25e' };
+
+/* -------------------------------------------------------------------- art */
+
+/**
+ * AI-repainted base painting (scripts/ai-repaint.mjs). It replaces the flat albedo of the
+ * room; the proxy geometry still drives depth, normals and shadows underneath it.
+ */
+export const ART = { aiAlbedo: new URL('../art/ai-albedo.png', import.meta.url).href };
 
 /* ----------------------------------------------------------------- editor */
 
