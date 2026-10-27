@@ -5,6 +5,24 @@
  */
 import type { Vec3 } from './math';
 
+/* ------------------------------------------------------------------ locale */
+
+/** UI languages. Every user-facing string in this file is a `Text` with one entry per locale. */
+export const LOCALES = ['zh-TW', 'en'] as const;
+export type Locale = (typeof LOCALES)[number];
+export type Text = Record<Locale, string>;
+
+export const I18N = {
+  /** Used when neither ?lang= nor a saved choice exists and the browser language is not Chinese. */
+  fallback: 'en' as Locale,
+  /** Browser languages starting with this prefix default to zh-TW. */
+  zhPrefix: 'zh',
+  queryParam: 'lang',
+  storageKey: 'room-atmosphere-2d:lang',
+  /** Label of each locale on the language switch, written in that language. */
+  names: { 'zh-TW': '中文', en: 'English' } as Text,
+};
+
 /* ------------------------------------------------------------------ raster */
 
 /** Painted layers (albedo / depth / normal / dust) and the lighting pass run at this pixel-art size. */
@@ -141,7 +159,7 @@ export interface Grade {
 export type PresetKey = 'original' | 'soft' | 'cinema';
 
 export interface Preset {
-  label: string;
+  label: Text;
   /** false = bypass lighting entirely and show the flat painting. */
   lit: boolean;
   grade: Grade;
@@ -149,17 +167,17 @@ export interface Preset {
 
 export const PRESETS: Record<PresetKey, Preset> = {
   original: {
-    label: '原始',
+    label: { 'zh-TW': '原始', en: 'Original' },
     lit: false,
     grade: { exposure: 0, contrast: 1, saturation: 1, lift: [0, 0, 0], gain: [1, 1, 1], temperature: 0, vignette: 0, bloom: 0, bloomThreshold: 1, softFocus: 0 },
   },
   soft: {
-    label: '柔光調色',
+    label: { 'zh-TW': '柔光調色', en: 'Soft' },
     lit: true,
     grade: { exposure: 0.35, contrast: 0.92, saturation: 0.95, lift: [0.05, 0.035, 0.03], gain: [1.02, 1.0, 0.97], temperature: 0.03, vignette: 0.25, bloom: 0.55, bloomThreshold: 0.75, softFocus: 0.22 },
   },
   cinema: {
-    label: '電影氣氛',
+    label: { 'zh-TW': '電影氣氛', en: 'Cinematic' },
     lit: true,
     grade: { exposure: 0.25, contrast: 1.18, saturation: 1.1, lift: [0.0, 0.012, 0.03], gain: [1.05, 0.99, 0.93], temperature: 0.02, vignette: 0.55, bloom: 0.9, bloomThreshold: 0.7, softFocus: 0.06 },
   },
@@ -169,22 +187,27 @@ export const PRESET_ORDER: PresetKey[] = ['original', 'soft', 'cinema'];
 
 /* --------------------------------------------------------------------- UI */
 
-export type ToggleKey = 'aiArt' | 'direct' | 'beam' | 'dust' | 'fog' | 'lamps' | 'softFocus' | 'grain' | 'chromatic' | 'animate' | 'debug';
+/**
+ * `edit` and `geometry` are independent: edit = pointer interaction (landing-point handle,
+ * select/drag/lift furniture), geometry = draw the proxy wireframes, panes and rays.
+ */
+export type ToggleKey = 'aiArt' | 'direct' | 'beam' | 'dust' | 'fog' | 'lamps' | 'softFocus' | 'grain' | 'chromatic' | 'animate' | 'edit' | 'geometry';
 export type SliderKey = 'time' | 'intensity' | 'beamDensity' | 'grainAmount' | 'chromaticAmount' | 'dustSpeed';
 export type ViewMode = 'final' | 'albedo' | 'depth' | 'normal' | 'direct';
 
-export const TOGGLES: { key: ToggleKey; label: string; initial: boolean }[] = [
-  { key: 'aiArt', label: 'AI 原圖', initial: true },
-  { key: 'direct', label: '直射光', initial: true },
-  { key: 'beam', label: '光束', initial: true },
-  { key: 'dust', label: '浮塵', initial: true },
-  { key: 'fog', label: '流動霧', initial: true },
-  { key: 'lamps', label: '室內燈', initial: true },
-  { key: 'softFocus', label: '柔焦', initial: true },
-  { key: 'grain', label: '膠片顆粒', initial: false },
-  { key: 'chromatic', label: '色散', initial: true },
-  { key: 'animate', label: '動態空氣', initial: true },
-  { key: 'debug', label: '幾何資料', initial: false },
+export const TOGGLES: { key: ToggleKey; label: Text; initial: boolean }[] = [
+  { key: 'aiArt', label: { 'zh-TW': 'AI 原圖', en: 'AI art' }, initial: true },
+  { key: 'direct', label: { 'zh-TW': '直射光', en: 'Sunlight' }, initial: true },
+  { key: 'beam', label: { 'zh-TW': '光束', en: 'Beams' }, initial: true },
+  { key: 'dust', label: { 'zh-TW': '浮塵', en: 'Dust' }, initial: true },
+  { key: 'fog', label: { 'zh-TW': '流動霧', en: 'Fog' }, initial: true },
+  { key: 'lamps', label: { 'zh-TW': '室內燈', en: 'Lamps' }, initial: true },
+  { key: 'softFocus', label: { 'zh-TW': '柔焦', en: 'Soft focus' }, initial: true },
+  { key: 'grain', label: { 'zh-TW': '膠片顆粒', en: 'Grain' }, initial: false },
+  { key: 'chromatic', label: { 'zh-TW': '色散', en: 'Chromatic' }, initial: true },
+  { key: 'animate', label: { 'zh-TW': '動態空氣', en: 'Animate' }, initial: true },
+  { key: 'edit', label: { 'zh-TW': '編輯', en: 'Edit' }, initial: false },
+  { key: 'geometry', label: { 'zh-TW': '顯示幾何', en: 'Show geometry' }, initial: false },
 ];
 
 const formatHour = (h: number) => {
@@ -194,21 +217,21 @@ const formatHour = (h: number) => {
 const formatPercent = (v: number) => `${Math.round(v * 100)}%`;
 const formatFixed = (v: number) => v.toFixed(2);
 
-export const SLIDERS: { key: SliderKey; label: string; min: number; max: number; step: number; initial: number; format: (v: number) => string }[] = [
-  { key: 'time', label: '時間', min: 0, max: 24, step: 0.25, initial: DAY_HOTKEY_HOUR, format: formatHour },
-  { key: 'intensity', label: '強度', min: 0, max: 1, step: 0.01, initial: 1, format: formatPercent },
-  { key: 'beamDensity', label: '光束濃度', min: 0, max: 0.6, step: 0.01, initial: 0.16, format: formatFixed },
-  { key: 'grainAmount', label: '顆粒', min: 0, max: 0.2, step: 0.005, initial: 0.06, format: formatFixed },
-  { key: 'chromaticAmount', label: '色散', min: 0, max: 6, step: 0.1, initial: 1.5, format: formatFixed },
-  { key: 'dustSpeed', label: '浮塵速度', min: 0, max: 4, step: 0.05, initial: 1, format: formatFixed },
+export const SLIDERS: { key: SliderKey; label: Text; min: number; max: number; step: number; initial: number; format: (v: number) => string }[] = [
+  { key: 'time', label: { 'zh-TW': '時間', en: 'Time' }, min: 0, max: 24, step: 0.25, initial: DAY_HOTKEY_HOUR, format: formatHour },
+  { key: 'intensity', label: { 'zh-TW': '強度', en: 'Intensity' }, min: 0, max: 1, step: 0.01, initial: 1, format: formatPercent },
+  { key: 'beamDensity', label: { 'zh-TW': '光束濃度', en: 'Beam density' }, min: 0, max: 0.6, step: 0.01, initial: 0.16, format: formatFixed },
+  { key: 'grainAmount', label: { 'zh-TW': '顆粒', en: 'Grain' }, min: 0, max: 0.2, step: 0.005, initial: 0.06, format: formatFixed },
+  { key: 'chromaticAmount', label: { 'zh-TW': '色散', en: 'Chromatic' }, min: 0, max: 6, step: 0.1, initial: 1.5, format: formatFixed },
+  { key: 'dustSpeed', label: { 'zh-TW': '浮塵速度', en: 'Dust speed' }, min: 0, max: 4, step: 0.05, initial: 1, format: formatFixed },
 ];
 
-export const VIEW_MODES: { key: ViewMode; label: string }[] = [
-  { key: 'final', label: '合成' },
-  { key: 'albedo', label: '原圖' },
-  { key: 'depth', label: '深度' },
-  { key: 'normal', label: '法線' },
-  { key: 'direct', label: '直射光' },
+export const VIEW_MODES: { key: ViewMode; label: Text }[] = [
+  { key: 'final', label: { 'zh-TW': '合成', en: 'Final' } },
+  { key: 'albedo', label: { 'zh-TW': '原圖', en: 'Albedo' } },
+  { key: 'depth', label: { 'zh-TW': '深度', en: 'Depth' } },
+  { key: 'normal', label: { 'zh-TW': '法線', en: 'Normal' } },
+  { key: 'direct', label: { 'zh-TW': '直射光', en: 'Sun' } },
 ];
 
 export const DEFAULT_PRESET: PresetKey = 'cinema';
@@ -219,41 +242,71 @@ export const HOTKEYS = {
   day: 'd',
   night: 'n',
   pause: 'p',
-  debug: 'g',
+  edit: 'e',
+  geometry: 'g',
   addBox: 'b',
   removeBox: ['delete', 'backspace'],
 };
 
 /** Page copy and outbound links (index.html header is filled from these). */
 export const PAGE = {
-  title: '房間光影',
-  subtitle: '一張平光像素畫，加上 2.5D 幾何資料，就能即時打光。',
-  referenceLabel: '參考：@vux429 的 Threads 貼文',
+  documentTitle: { 'zh-TW': '房間光影 · Room Atmosphere 2D', en: 'Room Atmosphere 2D' } as Text,
+  title: { 'zh-TW': '房間光影', en: 'Room Atmosphere' } as Text,
+  subtitle: {
+    'zh-TW': '一張平光像素畫，加上 2.5D 幾何資料，就能即時打光。',
+    en: 'A flat-lit pixel painting, relit live from a little 2.5D geometry.',
+  } as Text,
+  referenceLabel: { 'zh-TW': '參考：@vux429 的 Threads 貼文', en: 'Reference: @vux429 on Threads' } as Text,
   referenceUrl: 'https://www.threads.com/@vux429/post/De7EVP5GFse',
-  repoLabel: 'GitHub 原始碼',
+  repoLabel: { 'zh-TW': 'GitHub 原始碼', en: 'Source on GitHub' } as Text,
   repoUrl: 'https://github.com/Farl/room-atmosphere-2d',
   shortcuts: [
-    ['1–3', '預設'],
-    ['D', '日間'],
-    ['N', '夜間'],
-    ['P', '暫停動態'],
-    ['G', '幾何資料'],
-    ['B', '新增方塊'],
-    ['Delete', '刪除'],
-  ] as [string, string][],
+    ['1–3', { 'zh-TW': '預設', en: 'Presets' }],
+    ['D', { 'zh-TW': '日間', en: 'Day' }],
+    ['N', { 'zh-TW': '夜間', en: 'Night' }],
+    ['P', { 'zh-TW': '暫停動態', en: 'Pause' }],
+    ['E', { 'zh-TW': '編輯', en: 'Edit' }],
+    ['G', { 'zh-TW': '顯示幾何', en: 'Geometry' }],
+    ['B', { 'zh-TW': '新增方塊', en: 'Add box' }],
+    ['Delete', { 'zh-TW': '刪除', en: 'Delete' }],
+  ] as [string, Text][],
 };
 
-/** A control in the side panel: a toggle, a slider, or one of the composite widgets. */
-export type PanelItem = ToggleKey | SliderKey | 'presets' | 'view' | 'edit';
+/** Copy for the generated controls that is not a toggle/slider/preset label. */
+export const UI_TEXT = {
+  panel: { 'zh-TW': '控制面板', en: 'Controls' },
+  language: { 'zh-TW': '語言', en: 'Language' },
+  time: { 'zh-TW': '時間', en: 'Time' },
+  day: { 'zh-TW': '日間', en: 'Day' },
+  night: { 'zh-TW': '夜間', en: 'Night' },
+  presets: { 'zh-TW': '預設', en: 'Preset' },
+  view: { 'zh-TW': '檢視', en: 'View' },
+  toolbar: { 'zh-TW': '幾何資料', en: 'Geometry data' },
+  addBox: { 'zh-TW': '新增方塊', en: 'Add box' },
+  removeSelected: { 'zh-TW': '刪除選取', en: 'Delete selected' },
+  resetScene: { 'zh-TW': '重設場景', en: 'Reset scene' },
+  editHint: {
+    'zh-TW': '拖曳黃色落點改變光的方向；點選家具拖曳移動，滾輪調整高度。',
+    en: 'Drag the yellow point to aim the light. Click furniture to drag it; scroll to lift.',
+  },
+} satisfies Record<string, Text>;
 
-/** Side panel grouped by what the controls change. */
-export const PANEL_SECTIONS: { title: string; help?: string; items: PanelItem[] }[] = [
-  { title: '畫面', items: ['presets', 'view', 'intensity', 'aiArt'] },
-  { title: '光線', items: ['direct', 'beam', 'lamps'] },
-  { title: '空氣', items: ['dust', 'fog', 'animate'] },
-  { title: '鏡頭', items: ['softFocus', 'grain', 'chromatic'] },
-  { title: '幾何資料', help: '拖曳黃色落點改變光的方向；點選家具拖曳移動，滾輪調整高度。', items: ['debug', 'edit'] },
+/** A control in the side panel: a toggle, a slider, or one of the composite widgets. */
+export type PanelItem = ToggleKey | SliderKey | 'presets' | 'view';
+
+/**
+ * Side panel grouped by what the controls change. The geometry toggles are not here:
+ * they live in the toolbar under the stage (STAGE_TOOLBAR) so they never scroll away.
+ */
+export const PANEL_SECTIONS: { title: Text; items: PanelItem[] }[] = [
+  { title: { 'zh-TW': '畫面', en: 'Image' }, items: ['presets', 'view', 'intensity', 'aiArt'] },
+  { title: { 'zh-TW': '光線', en: 'Light' }, items: ['direct', 'beam', 'lamps'] },
+  { title: { 'zh-TW': '空氣', en: 'Air' }, items: ['dust', 'fog', 'animate'] },
+  { title: { 'zh-TW': '鏡頭', en: 'Lens' }, items: ['softFocus', 'grain', 'chromatic'] },
 ];
+
+/** Toggles in the toolbar directly under the stage. */
+export const STAGE_TOOLBAR: ToggleKey[] = ['edit', 'geometry'];
 
 /** Amount sliders shown on the same row as their effect toggle (dimmed while it is off). */
 export const TOGGLE_AMOUNTS: Partial<Record<ToggleKey, SliderKey>> = {
@@ -267,7 +320,7 @@ export const TOGGLE_AMOUNTS: Partial<Record<ToggleKey, SliderKey>> = {
 export const TIME_BAND = { sampleStep: 0.5, tickEvery: 3 };
 
 /** Debug overlay: landing-point handle size in display pixels. */
-export const OVERLAY = { handleRadius: 9, label: '直射光落點', lineColor: 'rgba(255,255,255,0.55)', accent: '#ffd25e' };
+export const OVERLAY = { handleRadius: 9, label: { 'zh-TW': '直射光落點', en: 'Light landing point' } as Text, lineColor: 'rgba(255,255,255,0.55)', accent: '#ffd25e' };
 
 /* -------------------------------------------------------------------- art */
 
@@ -279,7 +332,7 @@ export const ART = { aiAlbedo: new URL('../art/ai-albedo.png', import.meta.url).
 
 /* ----------------------------------------------------------------- editor */
 
-/** Interactive proxy editing (幾何資料 mode): drag to move, wheel to lift, add/remove boxes. */
+/** Interactive proxy editing (編輯 mode): drag to move, wheel to lift, add/remove boxes. */
 export const EDITOR = {
   /** Size of a box added with the 新增方塊 button, in world units. */
   newBoxSize: [0.6, 0.9, 0.6] as Vec3,

@@ -64,7 +64,8 @@ a:hover { text-decoration-color: var(--accent); }
 .title-block { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; }
 .title { margin: 0; font-family: var(--font-serif); font-size: 26px; font-weight: 700; letter-spacing: 0.04em; }
 .subtitle { margin: 0; color: var(--muted); }
-.links { display: flex; flex-wrap: wrap; gap: 6px 20px; }
+.links { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 20px; }
+.languages .segment { padding: 3px 10px; font-size: 12px; }
 
 /* --------------------------------------------------------------- workspace */
 
@@ -102,6 +103,15 @@ a:hover { text-decoration-color: var(--accent); }
   image-rendering: pixelated;
 }
 #overlay { position: absolute; inset: 0; touch-action: none; }
+
+/* ------------------------------------------------------------- stage toolbar */
+
+/* Geometry controls sit right under the image so they stay on screen while the panel scrolls. */
+.stage-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.toggle-chip[aria-pressed='true'] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 500; }
+.edit-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 6px; margin-left: 10px; padding-left: 12px; border-left: 1px solid var(--line); }
+.edit-tools[hidden] { display: none; }
+.edit-tools .help { margin: 0 0 0 6px; }
 
 /* ---------------------------------------------------------------- time band */
 
@@ -172,7 +182,7 @@ kbd {
 .section { padding: 16px 20px; border-bottom: 1px solid var(--line); }
 .section:last-child { border-bottom: 0; }
 .section-title { margin: 0 0 12px; font-family: var(--font-serif); font-size: 15px; font-weight: 600; letter-spacing: 0.06em; }
-.help { margin: -4px 0 12px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.help { color: var(--muted); font-size: 12px; line-height: 1.6; }
 
 .row {
   display: grid;
@@ -224,7 +234,6 @@ kbd {
   cursor: pointer;
 }
 .chip:hover { background: var(--control-hover); }
-.button-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 
 .switch {
   appearance: none;
@@ -266,6 +275,8 @@ kbd {
   .stage-fit { flex: none; container-type: normal; }
   .stage { width: 100%; }
   .time-band { margin-top: 10px; }
+  .edit-tools { margin-left: 0; padding-left: 0; border-left: 0; }
+  .edit-tools .help { display: none; }
   .panel { border-left: 0; border-top: 1px solid var(--line); }
   .shortcuts { display: none; }
 }
