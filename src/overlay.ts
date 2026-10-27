@@ -1,10 +1,13 @@
 /**
- * 幾何資料 overlay: draws the authored proxy data over the image, owns the
- * draggable 直射光落點 (direct light landing point) handle, and edits the proxy
- * geometry (click to select, drag to move along the floor, wheel to lift).
+ * Overlay over the image with two independent layers:
+ * - edit (編輯): pointer interaction, the draggable 直射光落點 (light landing point)
+ *   handle and the selected object's outline; click to select, drag to move along
+ *   the floor, wheel to lift.
+ * - geometry (顯示幾何): every proxy box as a wireframe, the window panes and their rays.
  */
 import { EDITOR, OUTPUT_SCALE, OVERLAY, SCENE_RES } from './config';
 import { pointOnFloor, project } from './camera';
+import { t } from './i18n';
 import { directionToLanding, landingPoint } from './lighting';
 import { add, scale, type Vec2, type Vec3 } from './math';
 import { windowCenter, type RoomData } from './scene/roomData';
@@ -17,6 +20,11 @@ export interface OverlayCallbacks {
 }
 
 type Drag = { kind: 'light' } | { kind: 'group'; group: string; last: Vec3 };
+
+export interface OverlayLayers {
+  edit: boolean;
+  geometry: boolean;
+}
 
 const DASH = [4, 4];
 
@@ -72,11 +80,19 @@ export class DebugOverlay {
     canvas.addEventListener('pointercancel', stop);
   }
 
-  setVisible(visible: boolean) {
-    this.canvas.style.display = visible ? 'block' : 'none';
+  /** Shows the canvas when any layer is on; only the edit layer takes pointer input. */
+  private apply({ edit, geometry }: OverlayLayers) {
+    this.canvas.style.display = edit || geometry ? 'block' : 'none';
+    this.canvas.style.pointerEvents = edit ? 'auto' : 'none';
+    if (!edit) {
+      this.drag = null;
+      this.handle = null;
+    }
   }
 
-  draw(toLight: Vec3) {
+  draw(toLight: Vec3, layers: OverlayLayers) {
+    this.apply(layers);
+    if (!layers.edit && !layers.geometry) return;
     const ctx = this.ctx;
     const s = OUTPUT_SCALE;
     const P = (p: Vec3): Vec2 => {
@@ -95,9 +111,10 @@ export class DebugOverlay {
     ctx.strokeStyle = OVERLAY.lineColor;
     ctx.setLineDash([]);
 
-    // Proxy boxes as wireframes; the selected group is highlighted.
+    // Proxy boxes as wireframes (geometry layer); the selected group is outlined while editing.
     for (const b of this.room.boxes) {
-      const isSelected = groupOf(b) === this.selected;
+      const isSelected = layers.edit && groupOf(b) === this.selected;
+      if (!isSelected && !layers.geometry) continue;
       ctx.strokeStyle = isSelected ? EDITOR.selectedColor : OVERLAY.lineColor;
       ctx.lineWidth = isSelected ? 2 : 1;
       const [x0, y0, z0] = b.min;
@@ -110,7 +127,7 @@ export class DebugOverlay {
     // Window panes and the rays from their corners down to the floor.
     ctx.strokeStyle = OVERLAY.accent;
     const x = this.room.windowX;
-    for (const p of this.room.panes) {
+    for (const p of layers.geometry ? this.room.panes : []) {
       const corners: Vec3[] = [[x, p.yMin, p.zMin], [x, p.yMin, p.zMax], [x, p.yMax, p.zMax], [x, p.yMax, p.zMin]];
       corners.forEach((c, i) => line(c, corners[(i + 1) % 4]));
       if (toLight[1] > 0) {
@@ -120,6 +137,8 @@ export class DebugOverlay {
       }
     }
 
+    // The landing handle belongs to the edit layer: it is the thing you drag.
+    if (!layers.edit) return;
     const land = landingPoint(this.room, toLight);
     this.handle = land ? project(land) : null;
     if (!land) return;
@@ -134,6 +153,6 @@ export class DebugOverlay {
     ctx.arc(hx, hy, OVERLAY.handleRadius, 0, Math.PI * 2);
     ctx.fill();
     ctx.font = '600 13px system-ui, sans-serif';
-    ctx.fillText(OVERLAY.label, hx + OVERLAY.handleRadius + 4, hy - OVERLAY.handleRadius);
+    ctx.fillText(t(OVERLAY.label), hx + OVERLAY.handleRadius + 4, hy - OVERLAY.handleRadius);
   }
 }

@@ -21,12 +21,12 @@ function start() {
   // Rebuilds are batched to one per frame however many pointer events arrive.
   let sceneDirty = false;
   const markDirty = () => (sceneDirty = true);
-  // Working copy: editing mutates this, ROOM_DATA stays the pristine source for 重設場景.
+  // Working copy: editing mutates this, ROOM_DATA stays the pristine source for 重設場景 (reset scene).
   const room = structuredClone(ROOM_DATA);
   const layers = new SceneLayers();
   layers.build(room);
 
-  // The AI repaint loads asynchronously; until then (or with AI 原圖 off) the flat painting shows.
+  // The AI repaint loads asynchronously; until then (or with AI art off) the flat painting shows.
   const aiPainting = new Image();
   let aiReady = false;
   aiPainting.onload = () => {
@@ -45,7 +45,7 @@ function start() {
   });
   const select = (group: string | null) => (overlay.selected = group);
   const byId = (id: string) => document.getElementById(id)!;
-  buildUi({ header: byId('header'), timeBand: byId('time-band'), panel: byId('panel'), shortcuts: byId('shortcuts') }, state, {
+  buildUi({ header: byId('header'), toolbar: byId('stage-toolbar'), timeBand: byId('time-band'), panel: byId('panel'), shortcuts: byId('shortcuts') }, state, {
     addBox: () => {
       select(addBox(room, RENDER.maxBoxes));
       markDirty();
@@ -87,8 +87,7 @@ function start() {
     }
     renderer.render(state, light, dust.canvas);
 
-    overlay.setVisible(state.toggles.debug);
-    if (state.toggles.debug) overlay.draw(light.toLight);
+    overlay.draw(light.toLight, { edit: state.toggles.edit, geometry: state.toggles.geometry });
     requestAnimationFrame(frame);
   };
   requestAnimationFrame(frame);
