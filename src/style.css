@@ -65,7 +65,8 @@ a:hover { text-decoration-color: var(--accent); }
 .title { margin: 0; font-family: var(--font-serif); font-size: 26px; font-weight: 700; letter-spacing: 0.04em; }
 .subtitle { margin: 0; color: var(--muted); }
 .links { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 20px; }
-.languages .segment { padding: 3px 10px; font-size: 12px; }
+/* Sized to each label: equal-width segments let "English" overflow its half and sit off center. */
+.languages .segment { flex: none; padding: 3px 10px; font-size: 12px; }
 
 /* --------------------------------------------------------------- workspace */
 
