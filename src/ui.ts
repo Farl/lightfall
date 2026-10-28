@@ -30,6 +30,7 @@ import {
 } from './config';
 import { applyDocumentLocale, locale, setLocale, t } from './i18n';
 import { skyColorAt } from './lighting';
+import { SCENE_ORDER, SCENES } from './scene/scenes';
 import type { AppState } from './state';
 
 /** Scene editing commands the toolbar and hotkeys can trigger (implemented in main.ts). */
@@ -158,9 +159,12 @@ export function buildUi(roots: UiRoots, state: AppState, actions: EditActions): 
 
   /* ---------------------------------------------------------------- toolbar */
 
-  // On-stage geometry controls: never inside the scrolling panel.
+  // On-stage scene and geometry controls: never inside the scrolling panel.
   roots.toolbar.setAttribute('role', 'toolbar');
   bindAria(roots.toolbar, UI_TEXT.toolbar);
+  const scenes = segmented(UI_TEXT.scene, SCENE_ORDER.map((k) => ({ key: k, label: SCENES[k].label })), () => state.scene, (k) => (state.scene = k));
+  scenes.classList.add('scenes');
+  roots.toolbar.append(scenes);
   for (const key of STAGE_TOOLBAR) {
     const b = bindText(button('chip toggle-chip'), toggleDef(key).label);
     b.onclick = () => {
@@ -246,6 +250,13 @@ export function buildUi(roots: UiRoots, state: AppState, actions: EditActions): 
       };
       syncers.push(() => (input.checked = state.toggles[item]));
       const r = el('label', 'row toggle-row');
+      // AI 原圖 only exists for scenes that ship a repainted base art.
+      if (item === 'aiArt') {
+        syncers.push(() => {
+          input.disabled = !SCENES[state.scene].art;
+          r.classList.toggle('is-unavailable', input.disabled);
+        });
+      }
       r.append(input, textEl('span', 'row-label', def.label));
       const amount = TOGGLE_AMOUNTS[item];
       if (amount) {

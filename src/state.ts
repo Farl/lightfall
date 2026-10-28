@@ -1,8 +1,10 @@
 /** Mutable app state, initialised from the UI definitions in config.ts. */
 import { DEFAULT_PRESET, SLIDERS, TOGGLES, type PresetKey, type SliderKey, type ToggleKey, type ViewMode } from './config';
 import type { Vec3 } from './math';
+import { DEFAULT_SCENE, type SceneKey } from './scene/scenes';
 
 export interface AppState {
+  scene: SceneKey;
   preset: PresetKey;
   view: ViewMode;
   toggles: Record<ToggleKey, boolean>;
@@ -15,6 +17,7 @@ export interface AppState {
 
 export function createState(): AppState {
   return {
+    scene: DEFAULT_SCENE,
     preset: DEFAULT_PRESET,
     view: 'final',
     toggles: Object.fromEntries(TOGGLES.map((t) => [t.key, t.initial])) as Record<ToggleKey, boolean>,

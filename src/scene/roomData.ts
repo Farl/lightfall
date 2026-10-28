@@ -11,8 +11,15 @@
  */
 import type { Vec3 } from '../math';
 
-/** `near` < 0 extends the shell behind the opening so floor and ceiling run off-screen. */
-export const ROOM = { width: 8, height: 3.4, depth: 5, near: -1.6 };
+/** Scene shell size. `near` < 0 extends the shell behind the opening so floor and ceiling run off-screen. */
+export interface Bounds {
+  width: number;
+  height: number;
+  depth: number;
+  near: number;
+}
+
+const ROOM: Bounds = { width: 8, height: 3.4, depth: 5, near: -1.6 };
 
 const HALF_W = ROOM.width / 2;
 
@@ -66,22 +73,47 @@ export interface BlobDef {
   group?: string;
 }
 
-/** Open glass of the window on the left wall, in (z, y). The light source shines only through these. */
-export interface PaneDef {
-  zMin: number;
-  yMin: number;
-  zMax: number;
-  yMax: number;
+/** Axis-aligned rect (u0, v0, u1, v1) in a plane's own coordinates. */
+export type Rect = [number, number, number, number];
+
+/**
+ * Leaf gaps of a canopy: the open parts of a masked aperture. Rasterised into a
+ * texture whose mip level is chosen by distance, so spots blur the farther they
+ * land from the leaves (sun-disc "pinhole" dapples, 木漏れ日).
+ */
+export interface MaskDef {
+  /** Aperture (u, v) area the texture covers; outside it the canopy is closed. */
+  rect: Rect;
+  /** Texture size in texels. */
+  resolution: [number, number];
+  holes: { center: [number, number]; radius: number }[];
+  /** Blur radius = distance from the canopy * this (angular size of the sun disc). */
+  softness: number;
+  /** Sway of the mask in world units, and its angular speed. */
+  wind: { amplitude: number; speed: number };
+}
+
+/**
+ * The opening the sun/moon shines through: an axis-aligned plane with open rects.
+ *   axis 0 (x = at): a wall window, panes in (z, y)
+ *   axis 1 (y = at): a canopy overhead, panes in (x, z)
+ * With a mask, light inside a pane is further multiplied by the leaf-gap texture.
+ */
+export interface ApertureDef {
+  axis: 0 | 1;
+  at: number;
+  panes: Rect[];
+  mask?: MaskDef;
 }
 
 export interface RoomData {
+  bounds: Bounds;
   shell: Record<Plane, string>;
   decals: DecalDef[];
   discs: DiscDef[];
   boxes: BoxDef[];
   blobs: BlobDef[];
-  windowX: number;
-  panes: PaneDef[];
+  aperture: ApertureDef;
   lamps: Vec3[];
 }
 
@@ -150,18 +182,20 @@ function windowDecals(): DecalDef[] {
   ];
 }
 
-function windowPanes(): PaneDef[] {
+/** Open glass of the window on the left wall, in (z, y). */
+function windowPanes(): Rect[] {
   const { z0, z1, y0, y1, frame, mullion } = WINDOW;
   const mid = (z0 + z1) / 2;
   return [
-    { zMin: Math.max(z0 + frame, z0 + CURTAIN.overlap), yMin: y0 + frame, zMax: mid - mullion / 2, yMax: y1 - frame },
-    { zMin: mid + mullion / 2, yMin: y0 + frame, zMax: Math.min(z1 - frame, z1 - CURTAIN.overlap), yMax: y1 - frame },
+    [Math.max(z0 + frame, z0 + CURTAIN.overlap), y0 + frame, mid - mullion / 2, y1 - frame],
+    [mid + mullion / 2, y0 + frame, Math.min(z1 - frame, z1 - CURTAIN.overlap), y1 - frame],
   ];
 }
 
-const box = (name: string, min: Vec3, max: Vec3, color: string, extra: Partial<BoxDef> = {}): BoxDef => ({ name, min, max, color, ...extra });
+export const box = (name: string, min: Vec3, max: Vec3, color: string, extra: Partial<BoxDef> = {}): BoxDef => ({ name, min, max, color, ...extra });
 
 export const ROOM_DATA: RoomData = {
+  bounds: ROOM,
   shell: { floor: PALETTE.floor, ceiling: PALETTE.ceiling, back: PALETTE.wallBack, left: PALETTE.wallSide, right: PALETTE.wallSide },
   decals: [
     ...floorPlanks(),
@@ -227,27 +261,28 @@ export const ROOM_DATA: RoomData = {
     { center: [-3.85, 1.25, 1.75], radius: 0.25, color: '#3f7c3f', normal: [0.2, 0.7, -0.68], group: 'plant' },
     { center: [-3.6, 1.36, 1.72], radius: 0.17, color: '#68ab5e', normal: [0.4, 0.8, -0.45], group: 'plant' },
   ],
-  windowX: -HALF_W,
-  panes: windowPanes(),
+  aperture: { axis: 0, at: -HALF_W, panes: windowPanes() },
   lamps: [
     [-1.6, ROOM.height - 0.12, 3.0],
     [1.8, ROOM.height - 0.12, 3.0],
   ],
 };
 
+/* --------------------------------------------------------- plane helpers */
+
 /** Map plane-local (u, v) to world space. */
-export function planePoint(plane: Plane, u: number, v: number): Vec3 {
+export function planePoint(b: Bounds, plane: Plane, u: number, v: number): Vec3 {
   switch (plane) {
     case 'floor':
       return [u, 0, v];
     case 'ceiling':
-      return [u, ROOM.height, v];
+      return [u, b.height, v];
     case 'back':
-      return [u, v, ROOM.depth];
+      return [u, v, b.depth];
     case 'left':
-      return [-HALF_W, v, u];
+      return [-b.width / 2, v, u];
     case 'right':
-      return [HALF_W, v, u];
+      return [b.width / 2, v, u];
   }
 }
 
@@ -259,18 +294,43 @@ export const PLANE_NORMAL: Record<Plane, Vec3> = {
   right: [-1, 0, 0],
 };
 
-/** Room shell rect per plane in its own (u, v). */
-export const PLANE_EXTENT: Record<Plane, [number, number, number, number]> = {
-  floor: [-HALF_W, ROOM.near, HALF_W, ROOM.depth],
-  ceiling: [-HALF_W, ROOM.near, HALF_W, ROOM.depth],
-  back: [-HALF_W, 0, HALF_W, ROOM.height],
-  left: [ROOM.near, 0, ROOM.depth, ROOM.height],
-  right: [ROOM.near, 0, ROOM.depth, ROOM.height],
-};
-
-/** Center of all window panes; the anchor of the "direct light landing point" handle. */
-export function windowCenter(room: RoomData): Vec3 {
-  const z = room.panes.reduce((s, p) => s + (p.zMin + p.zMax) / 2, 0) / room.panes.length;
-  const y = room.panes.reduce((s, p) => s + (p.yMin + p.yMax) / 2, 0) / room.panes.length;
-  return [room.windowX, y, z];
+/** Shell rect of a plane in its own (u, v). */
+export function planeExtent(b: Bounds, plane: Plane): Rect {
+  const hw = b.width / 2;
+  if (plane === 'floor' || plane === 'ceiling') return [-hw, b.near, hw, b.depth];
+  if (plane === 'back') return [-hw, 0, hw, b.height];
+  return [b.near, 0, b.depth, b.height];
 }
+
+/* ------------------------------------------------------- aperture helpers */
+
+/** Shell plane an aperture lies on (the wall window or the canopy ceiling). */
+export const aperturePlane = (a: ApertureDef): Plane => (a.axis === 0 ? (a.at < 0 ? 'left' : 'right') : 'ceiling');
+
+/** Aperture-plane (u, v) to world space. */
+export const aperturePoint = (a: ApertureDef, u: number, v: number): Vec3 => (a.axis === 0 ? [a.at, v, u] : [u, a.at, v]);
+
+/** World point to aperture-plane (u, v). */
+export const apertureUv = (a: ApertureDef, p: Vec3): [number, number] => (a.axis === 0 ? [p[2], p[1]] : [p[0], p[2]]);
+
+/** Panes clipped to the visible shell plane (a canopy mask can extend far beyond the shell). */
+export function visiblePanes(room: RoomData): Rect[] {
+  const [eu0, ev0, eu1, ev1] = planeExtent(room.bounds, aperturePlane(room.aperture));
+  return room.aperture.panes
+    .map(([u0, v0, u1, v1]): Rect => [Math.max(u0, eu0), Math.max(v0, ev0), Math.min(u1, eu1), Math.min(v1, ev1)])
+    .filter(([u0, v0, u1, v1]) => u0 < u1 && v0 < v1);
+}
+
+/** Center of the visible panes; the anchor of the "direct light landing point" handle. */
+export function apertureCenter(room: RoomData): Vec3 {
+  const panes = visiblePanes(room);
+  const mean = (pick: (r: Rect) => number) => panes.reduce((s, r) => s + pick(r), 0) / panes.length;
+  return aperturePoint(room.aperture, mean((r) => (r[0] + r[2]) / 2), mean((r) => (r[1] + r[3]) / 2));
+}
+
+/** +1 or -1: which side of the aperture plane the inside of the scene is on. */
+export const apertureInward = (room: RoomData) => {
+  const a = room.aperture;
+  const inside = a.axis === 0 ? 0 : room.bounds.height / 2;
+  return Math.sign(inside - a.at);
+};

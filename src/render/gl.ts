@@ -108,6 +108,14 @@ export function uploadCanvas(gl: WebGL2RenderingContext, tex: WebGLTexture, sour
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
 }
 
+/** Upload a canvas and build its mip chain, for textures sampled at a chosen blur level (textureLod). */
+export function uploadMipmapped(gl: WebGL2RenderingContext, tex: WebGLTexture, source: HTMLCanvasElement) {
+  uploadCanvas(gl, tex, source);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.generateMipmap(gl.TEXTURE_2D);
+}
+
 /** HDR (half float) target when the GPU can render to it, otherwise 8-bit. */
 export function createTarget(gl: WebGL2RenderingContext, width: number, height: number, filter: number, hdr: boolean): RenderTarget {
   const tex = createTexture(gl, filter);

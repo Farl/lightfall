@@ -3,7 +3,8 @@
 //
 // Inputs are Canvas2D layers (albedo, depth, normal, emissive) rasterised from the
 // authored 2.5D proxy data. Per pixel we rebuild the world position from depth,
-// then trace shadow rays analytically against the window panes and proxy boxes.
+// then trace shadow rays analytically against the aperture (window panes or a
+// leaf-masked canopy) and the proxy boxes.
 // No meshes, no shadow maps: the scene is small enough to loop over every box.
 precision highp float;
 
@@ -24,12 +25,13 @@ uniform sampler2D uDepth;
 uniform sampler2D uNormal;
 uniform sampler2D uEmissive;   // R sky, G lamp, B tv coverage
 uniform sampler2D uDust;
+uniform sampler2D uMask;      // leaf gaps of a masked aperture (mipmapped; level = sun-disc blur)
 
 uniform vec2 uRes;
 uniform vec2 uCenter;
 uniform vec4 uCam;          // x, y, dist, focal  (mirrors camera.ts)
 uniform vec2 uDepthRange;   // 1/w at far, 1/w at near
-uniform float uRoomNear;    // z where the room shell starts (beam march start)
+uniform float uRoomNear;    // z where the scene shell starts (beam march start)
 
 uniform vec3 uToLight;
 uniform vec3 uLightColor;
@@ -41,9 +43,16 @@ uniform vec3 uAmbientSky;
 uniform vec3 uAmbientGround;
 uniform vec3 uBounce;
 
-uniform float uWindowX;
+// Aperture plane: axis 0 -> x = at, (u, v) = (z, y); axis 1 -> y = at, (u, v) = (x, z).
+uniform int uApertureAxis;
+uniform float uApertureAt;
 uniform int uPaneCount;
-uniform vec4 uPanes[MAX_PANES];   // zMin, yMin, zMax, yMax
+uniform vec4 uPanes[MAX_PANES];   // u0, v0, u1, v1
+uniform int uMaskOn;
+uniform vec4 uMaskRect;           // (u, v) area covered by uMask
+uniform float uMaskSoftness;      // blur radius per unit distance from the aperture
+uniform float uMaskTexelsPerUnit;
+uniform vec2 uWind;               // amplitude, speed
 uniform int uBoxCount;
 uniform vec3 uBoxMin[MAX_BOXES];
 uniform vec3 uBoxMax[MAX_BOXES];
@@ -58,7 +67,7 @@ uniform float uTvFlicker;
 
 uniform vec3 uSkyTop;
 uniform vec3 uSkyBottom;
-uniform vec2 uSkyRange;           // y range of the panes
+uniform vec2 uSkyRange;           // y range the sky gradient spans
 
 uniform float uTime;
 uniform int uDirect;
@@ -121,25 +130,46 @@ bool blocked(vec3 o, vec3 d, float tMax) {
   return false;
 }
 
-// 1 if a ray toward the light exits through a pane unobstructed. `hit` = (z, y) on the window plane.
+// Wind sway of the leaf mask; mirrors windOffset() in lighting.ts.
+vec2 windOffset(vec2 uv) {
+  return uWind.x * vec2(sin(uTime * uWind.y + uv.y * 0.9), cos(uTime * uWind.y * 0.83 + uv.x * 0.7));
+}
+
+// Leaf-gap coverage where the ray crossed the canopy, `dist` away from the shaded point.
+// Every gap acts as a pinhole: its spot is the sun disc, blurred by distance * softness,
+// which is exactly what the mip level of a box-filtered mask approximates.
+float leafGaps(vec2 hit, float dist) {
+  vec2 p = hit + windOffset(hit);
+  vec2 uv = (p - uMaskRect.xy) / (uMaskRect.zw - uMaskRect.xy);
+  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return 0.0;
+  float lod = log2(max(dist * uMaskSoftness * uMaskTexelsPerUnit, 1.0));
+  // The mask canvas grows v downward and is uploaded flipped.
+  return textureLod(uMask, vec2(uv.x, 1.0 - uv.y), lod).r;
+}
+
+// Light (0..1) reaching `o`: the ray toward the light has to cross the aperture inside a pane,
+// through a leaf gap if masked, without hitting a box. `hit` = (u, v) on the aperture plane.
 float lightVisible(vec3 o, vec3 L, out vec2 hit) {
   hit = vec2(0.0);
-  if (L.x > -1e-4) return 0.0;
-  float t = (uWindowX - o.x) / L.x;
+  float la = uApertureAxis == 0 ? L.x : L.y;
+  if (abs(la) < 1e-4) return 0.0;
+  float t = (uApertureAt - (uApertureAxis == 0 ? o.x : o.y)) / la;
   if (t <= 0.0) return 0.0;
   vec3 q = o + L * t;
-  hit = q.zy;
+  hit = uApertureAxis == 0 ? q.zy : q.xz;
   bool inside = false;
   for (int i = 0; i < MAX_PANES; i++) {
     if (i >= uPaneCount) break;
     vec4 p = uPanes[i];
-    inside = inside || (q.z >= p.x && q.z <= p.z && q.y >= p.y && q.y <= p.w);
+    inside = inside || (hit.x >= p.x && hit.x <= p.z && hit.y >= p.y && hit.y <= p.w);
   }
   if (!inside) return 0.0;
-  return blocked(o, L, t) ? 0.0 : 1.0;
+  float m = uMaskOn == 1 ? leafGaps(hit, t) : 1.0;
+  if (m <= 0.002) return 0.0;
+  return blocked(o, L, t) ? 0.0 : m;
 }
 
-// Streaky "dirty glass" modulation, keyed on where the ray crosses the window,
+// Streaky "dirty glass" modulation, keyed on where the ray crosses the aperture,
 // so everything lit through the same spot of glass shares it -> visible shafts.
 float shaft(vec2 hit) {
   float n = vnoise(vec3(hit.x * uShaftScale, hit.y * uShaftScale * 0.35, uTime * 0.05));
@@ -206,8 +236,8 @@ void main() {
   color += albedo * uLampEmit * emit.g;
   color += albedo * uTvEmit * (0.85 + 0.15 * sin(uTime * uTvFlicker)) * emit.b;
 
-  // Volumetric beam: march the camera ray from the near plane of the room to the surface,
-  // accumulating in-scattered light wherever the sample can see the light through a pane.
+  // Volumetric beam: march the camera ray from the near plane of the scene to the surface,
+  // accumulating in-scattered light wherever the sample can see the light through the aperture.
   if (uBeam == 1) {
     float w0 = uCam.z + uRoomNear;
     float seg = max(w - w0, 0.0) / float(uBeamSteps);
@@ -218,7 +248,7 @@ void main() {
       float v = lightVisible(S, L, hit);
       if (v > 0.0) {
         float dens = uFog == 1 ? 0.4 + 1.2 * fbm(S * 1.3 + vec3(uTime * uFogDrift, 0.0, 0.0)) : 1.0;
-        acc += dens * shaft(hit);
+        acc += v * dens * shaft(hit);
       }
     }
     color += uLightColor * acc * seg * length(rd) * uBeamDensity;

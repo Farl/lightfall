@@ -9,7 +9,7 @@
 import { EDITOR } from '../config';
 import { CAMERA_POS, viewRay } from '../camera';
 import { add, clamp, dot, scale, sub, type Vec3 } from '../math';
-import { ROOM, type BlobDef, type BoxDef, type RoomData } from './roomData';
+import type { BlobDef, BoxDef, RoomData } from './roomData';
 
 export const groupOf = (item: BoxDef | BlobDef) => item.group ?? ('name' in item ? item.name : '');
 
@@ -50,8 +50,9 @@ export function moveGroup(room: RoomData, group: string, delta: Vec3) {
   const bounds = groupBounds(room, group);
   if (!bounds) return;
   const m = EDITOR.wallMargin;
-  const lo: Vec3 = [-ROOM.width / 2 + m, 0, 0 + m];
-  const hi: Vec3 = [ROOM.width / 2 - m, ROOM.height - m, ROOM.depth - m];
+  const { width, height, depth } = room.bounds;
+  const lo: Vec3 = [-width / 2 + m, 0, 0 + m];
+  const hi: Vec3 = [width / 2 - m, height - m, depth - m];
   const d = delta.map((v, i) => clamp(v, lo[i] - bounds.min[i], hi[i] - bounds.max[i])) as Vec3;
 
   for (const b of room.boxes) {
@@ -66,11 +67,10 @@ export function moveGroup(room: RoomData, group: string, delta: Vec3) {
 
 let addedCount = 0;
 
-/** Add a plain box at the spawn point; returns its group, or null when the shader's box budget is full. */
-export function addBox(room: RoomData, maxBoxes: number): string | null {
+/** Add a plain box at the scene's spawn (x, z); returns its group, or null when the shader's box budget is full. */
+export function addBox(room: RoomData, maxBoxes: number, [x, z]: [number, number]): string | null {
   if (room.boxes.length >= maxBoxes) return null;
   const [w, h, dpt] = EDITOR.newBoxSize;
-  const [x, z] = EDITOR.newBoxSpawn;
   const name = `custom${++addedCount}`;
   room.boxes.push({
     name,

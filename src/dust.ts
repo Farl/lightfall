@@ -4,10 +4,10 @@
  * The lighting shader turns R into sun-colored sparkle and G into a faint ambient speck.
  */
 import { ATMOSPHERE, CAMERA, SCENE_RES } from './config';
-import { depthCode, project, viewDepth } from './camera';
+import { project, viewDepth } from './camera';
 import { lightVisible } from './lighting';
 import type { Vec3 } from './math';
-import { ROOM, type RoomData } from './scene/roomData';
+import type { Bounds, RoomData } from './scene/roomData';
 import type { SceneLayers } from './scene/layers';
 
 /** Motes stay off the walls by this margin and keep away from the camera plane. */
@@ -25,28 +25,33 @@ interface Mote {
 }
 
 const randomIn = (lo: number, hi: number) => lo + Math.random() * (hi - lo);
-const bounds = {
-  min: [-ROOM.width / 2 + MARGIN, MARGIN, MARGIN] as Vec3,
-  max: [ROOM.width / 2 - MARGIN, ROOM.height - MARGIN, ROOM.depth - MARGIN] as Vec3,
-};
 
 export class DustField {
   readonly canvas = document.createElement('canvas');
   private ctx: CanvasRenderingContext2D;
   private motes: Mote[] = [];
+  private bounds = { min: [0, 0, 0] as Vec3, max: [0, 0, 0] as Vec3 };
 
-  constructor(count = ATMOSPHERE.dustCount) {
+  constructor() {
     this.canvas.width = SCENE_RES.width;
     this.canvas.height = SCENE_RES.height;
     this.ctx = this.canvas.getContext('2d')!;
-    for (let i = 0; i < count; i++) {
-      this.motes.push({ p: [0, 1, 2].map((a) => randomIn(bounds.min[a], bounds.max[a])) as Vec3, phase: Math.random() * Math.PI * 2 });
-    }
+  }
+
+  /** Scatter `count` motes through a scene's volume (call on scene switch). */
+  reset(b: Bounds, count = ATMOSPHERE.dustCount) {
+    this.bounds = {
+      min: [-b.width / 2 + MARGIN, MARGIN, MARGIN],
+      max: [b.width / 2 - MARGIN, b.height - MARGIN, b.depth - MARGIN],
+    };
+    const { min, max } = this.bounds;
+    this.motes = Array.from({ length: count }, () => ({ p: [0, 1, 2].map((a) => randomIn(min[a], max[a])) as Vec3, phase: Math.random() * Math.PI * 2 }));
   }
 
   /** Slow curl-ish drift: each axis follows a sine of the other two, then wraps inside the room. */
   update(dt: number, speed: number, time: number) {
     const s = dt * speed * ATMOSPHERE.dustDrift;
+    const bounds = this.bounds;
     for (const m of this.motes) {
       const [x, y, z] = m.p;
       m.p[0] += Math.sin(y * 1.7 + time * 0.3 + m.phase) * s;
@@ -70,10 +75,10 @@ export class DustField {
     for (const m of this.motes) {
       const [sx, sy] = project(m.p);
       if (sx < 0 || sy < 0 || sx >= SCENE_RES.width || sy >= SCENE_RES.height) continue;
-      if (depthCode(m.p) < layers.depthAt(sx, sy) - OCCLUSION_SLACK) continue;
+      if (layers.depthCode(m.p) < layers.depthAt(sx, sy) - OCCLUSION_SLACK) continue;
       const twinkle = 0.55 + 0.45 * Math.sin(time * TWINKLE_SPEED + m.phase * 7);
       const v = Math.round(255 * twinkle);
-      ctx.fillStyle = lightVisible(m.p, toLight, room) ? `rgb(${v},0,0)` : `rgb(0,${v},0)`;
+      ctx.fillStyle = lightVisible(m.p, toLight, room, layers.maskAt, time) > 0 ? `rgb(${v},0,0)` : `rgb(0,${v},0)`;
       const size = Math.min(MAX_MOTE_PX, Math.max(1, (CAMERA.focal * MOTE_SIZE) / viewDepth(m.p)));
       ctx.fillRect(Math.floor(sx), Math.floor(sy), size, size);
     }

@@ -5,15 +5,16 @@
  *   depth     R = normalised 1/w
  *   normal    RGB = world normal * 0.5 + 0.5
  *   emissive  R = sky, G = lamp, B = TV coverage masks
+ *   mask      (separate size) top-down leaf gaps of a canopy aperture, if any
  *
  * depth + normal together are the G-buffer the lighting shader reconstructs world
  * positions from. Every primitive goes through `fillPolygon`, so the three layers
  * can never disagree about coverage or draw order (painter's algorithm, far to near).
  */
 import { CAMERA, SCENE_RES } from '../config';
-import { depthCode, project, viewDepth } from '../camera';
+import { depthCode, depthRange, project, viewDepth, type DepthRange } from '../camera';
 import { shadeHex, type Vec2, type Vec3 } from '../math';
-import { Emissive, FACE_SHADE, PLANE_EXTENT, PLANE_NORMAL, planePoint, type BoxDef, type Plane, type RoomData } from './roomData';
+import { Emissive, FACE_SHADE, PLANE_NORMAL, planeExtent, planePoint, type BoxDef, type Bounds, type MaskDef, type Plane, type RoomData } from './roomData';
 
 /** Segments used to approximate a disc lying on a plane. */
 const DISC_SEGMENTS = 24;
@@ -43,19 +44,29 @@ export class SceneLayers {
   readonly depth = makeCanvas(true);
   readonly normal = makeCanvas(false);
   readonly emissive = makeCanvas(false);
+  /** Leaf-gap texture of a masked aperture; null for scenes without one. */
+  mask: HTMLCanvasElement | null = null;
+  /** Bumped whenever `mask` is redrawn, so the renderer re-uploads (and re-mips) only then. */
+  maskVersion = 0;
+  private maskSource: MaskDef | null = null;
+  private maskPixels: Uint8ClampedArray | null = null;
   /** CPU copy of the depth layer, used to occlude dust particles. */
   private depthPixels: Uint8ClampedArray | null = null;
+  private bounds!: Bounds;
+  private range!: DepthRange;
 
   /**
    * @param painting optional base painting (e.g. the AI repaint) that replaces the flat albedo.
    *   It must share the proxy's layout; boxes flagged `overpaint` are painted on top of it.
    */
   build(room: RoomData, painting: CanvasImageSource | null = null) {
+    this.bounds = room.bounds;
+    this.range = depthRange(room.bounds);
+    this.buildMask(room.aperture.mask ?? null);
     for (const layer of [this.albedo, this.depth, this.normal, this.emissive]) layer.ctx.clearRect(0, 0, SCENE_RES.width, SCENE_RES.height);
 
     for (const plane of SHELL_ORDER) {
-      const [u0, v0, u1, v1] = PLANE_EXTENT[plane];
-      this.planeRect(plane, [u0, v0, u1, v1], room.shell[plane], Emissive.None);
+      this.planeRect(plane, planeExtent(room.bounds, plane), room.shell[plane], Emissive.None);
       for (const d of room.decals) if (d.plane === plane) this.planeRect(plane, d.rect, d.color, d.emissive ?? Emissive.None);
       for (const d of room.discs) if (d.plane === plane) this.planeDisc(plane, d.center, d.radius, d.color, d.emissive ?? Emissive.None);
     }
@@ -77,6 +88,11 @@ export class SceneLayers {
     this.depthPixels = this.depth.ctx.getImageData(0, 0, SCENE_RES.width, SCENE_RES.height).data;
   }
 
+  /** Depth code of a world point in this scene's range (compare with `depthAt`). */
+  depthCode(p: Vec3) {
+    return depthCode(p, this.range);
+  }
+
   /** Normalised depth code of the surface at a scene pixel (0 = far). */
   depthAt(sx: number, sy: number): number {
     if (!this.depthPixels) return 0;
@@ -85,10 +101,56 @@ export class SceneLayers {
     return this.depthPixels[(y * SCENE_RES.width + x) * 4] / 255;
   }
 
+  /**
+   * Leaf gaps as white discs on black, v growing down the canvas rows. Edits never touch
+   * the mask, so it is redrawn only when the scene (and with it the mask object) changes.
+   */
+  private buildMask(def: MaskDef | null) {
+    if (def === this.maskSource) return;
+    this.maskSource = def;
+    this.maskVersion++;
+    if (!def) {
+      this.mask = null;
+      this.maskPixels = null;
+      return;
+    }
+    const [w, h] = def.resolution;
+    const [u0, v0, u1, v1] = def.rect;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#fff';
+    const sx = w / (u1 - u0);
+    const sy = h / (v1 - v0);
+    for (const { center, radius } of def.holes) {
+      ctx.beginPath();
+      ctx.ellipse((center[0] - u0) * sx, (center[1] - v0) * sy, radius * sx, radius * sy, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    this.mask = canvas;
+    this.maskPixels = ctx.getImageData(0, 0, w, h).data;
+  }
+
+  /** Leaf-gap coverage at an aperture (u, v), nearest texel; 0 outside the mask (closed canopy). */
+  readonly maskAt = (u: number, v: number): number => {
+    const def = this.maskSource;
+    if (!def || !this.maskPixels) return 1;
+    const [u0, v0, u1, v1] = def.rect;
+    const [w, h] = def.resolution;
+    const x = Math.floor(((u - u0) / (u1 - u0)) * w);
+    const y = Math.floor(((v - v0) / (v1 - v0)) * h);
+    if (x < 0 || y < 0 || x >= w || y >= h) return 0;
+    return this.maskPixels[(y * w + x) * 4] / 255;
+  };
+
   /* -------------------------------------------------------------- primitives */
 
   private planeRect(plane: Plane, [u0, v0, u1, v1]: [number, number, number, number], color: string, emissive: Emissive) {
-    const pts = [planePoint(plane, u0, v0), planePoint(plane, u1, v0), planePoint(plane, u1, v1), planePoint(plane, u0, v1)];
+    const b = this.bounds;
+    const pts = [planePoint(b, plane, u0, v0), planePoint(b, plane, u1, v0), planePoint(b, plane, u1, v1), planePoint(b, plane, u0, v1)];
     this.fillPolygon(pts, color, PLANE_NORMAL[plane], emissive);
   }
 
@@ -96,7 +158,7 @@ export class SceneLayers {
     const pts: Vec3[] = [];
     for (let i = 0; i < DISC_SEGMENTS; i++) {
       const a = (i / DISC_SEGMENTS) * Math.PI * 2;
-      pts.push(planePoint(plane, cu + Math.cos(a) * r, cv + Math.sin(a) * r));
+      pts.push(planePoint(this.bounds, plane, cu + Math.cos(a) * r, cv + Math.sin(a) * r));
     }
     this.fillPolygon(pts, color, PLANE_NORMAL[plane], emissive);
   }
@@ -131,7 +193,7 @@ export class SceneLayers {
       ctx.fill();
     };
     paint(this.albedo.ctx, color);
-    paint(this.depth.ctx, depthColor(depthCode(center)));
+    paint(this.depth.ctx, depthColor(this.depthCode(center)));
     paint(this.normal.ctx, encodeNormal(normal));
     paint(this.emissive.ctx, EMISSIVE_COLOR[Emissive.None]);
   }
@@ -151,7 +213,7 @@ export class SceneLayers {
     trace(this.albedo.ctx);
     if (albedoOnly) return;
 
-    this.depth.ctx.fillStyle = affineDepthStyle(this.depth.ctx, screen, world.map(depthCode));
+    this.depth.ctx.fillStyle = affineDepthStyle(this.depth.ctx, screen, world.map((p) => this.depthCode(p)));
     trace(this.depth.ctx);
 
     this.normal.ctx.fillStyle = encodeNormal(normal);
@@ -181,6 +243,8 @@ function affineDepthStyle(ctx: CanvasRenderingContext2D, screen: Vec2[], codes: 
   const a = (dv1 * d2[1] - dv2 * d1[1]) / det;
   const b = (d1[0] * dv2 - d2[0] * dv1) / det;
   const g2 = a * a + b * b;
+  // Clamped depth codes (geometry past the depth range) can make the first three vertices flat.
+  if (g2 < 1e-12) return depthColor(codes[0]);
   const at = (v: number): Vec2 => [p0[0] + (a * (v - codes[0])) / g2, p0[1] + (b * (v - codes[0])) / g2];
 
   const [sx, sy] = at(vMin);

@@ -3,14 +3,14 @@
  * - edit (編輯): pointer interaction, the draggable 直射光落點 (light landing point)
  *   handle and the selected object's outline; click to select, drag to move along
  *   the floor, wheel to lift.
- * - geometry (顯示幾何): every proxy box as a wireframe, the window panes and their rays.
+ * - geometry (顯示幾何): every proxy box as a wireframe, the aperture panes and their rays.
  */
 import { EDITOR, OUTPUT_SCALE, OVERLAY, SCENE_RES } from './config';
 import { pointOnFloor, project } from './camera';
 import { t } from './i18n';
 import { directionToLanding, landingPoint } from './lighting';
 import { add, scale, type Vec2, type Vec3 } from './math';
-import { windowCenter, type RoomData } from './scene/roomData';
+import { apertureCenter, aperturePoint, visiblePanes, type RoomData } from './scene/roomData';
 import { groupOf, liftDelta, moveGroup, pickGroup } from './scene/editing';
 
 export interface OverlayCallbacks {
@@ -60,8 +60,8 @@ export class DebugOverlay {
       const p = pointOnFloor(...toScene(e));
       if (!p) return;
       if (this.drag.kind === 'light') {
-        // Keep the landing point inside the room, in front of the window wall.
-        if (p[0] > room.windowX + 0.2) cb.onLightDrag(directionToLanding(room, p));
+        const toLight = directionToLanding(room, p);
+        if (toLight) cb.onLightDrag(toLight);
         return;
       }
       // Floor-plane delta: objects slide along x/z and keep their height.
@@ -124,13 +124,14 @@ export class DebugOverlay {
     }
     ctx.lineWidth = 1;
 
-    // Window panes and the rays from their corners down to the floor.
+    // Aperture panes (clipped to the shell) and, for plain windows, the rays from their corners
+    // down to the floor. A leaf mask has hundreds of gaps, so its outline alone is drawn.
     ctx.strokeStyle = OVERLAY.accent;
-    const x = this.room.windowX;
-    for (const p of layers.geometry ? this.room.panes : []) {
-      const corners: Vec3[] = [[x, p.yMin, p.zMin], [x, p.yMin, p.zMax], [x, p.yMax, p.zMax], [x, p.yMax, p.zMin]];
+    const aperture = this.room.aperture;
+    for (const [u0, v0, u1, v1] of layers.geometry ? visiblePanes(this.room) : []) {
+      const corners: Vec3[] = [aperturePoint(aperture, u0, v0), aperturePoint(aperture, u1, v0), aperturePoint(aperture, u1, v1), aperturePoint(aperture, u0, v1)];
       corners.forEach((c, i) => line(c, corners[(i + 1) % 4]));
-      if (toLight[1] > 0) {
+      if (toLight[1] > 0 && !aperture.mask) {
         ctx.setLineDash(DASH);
         for (const c of corners) line(c, add(c, scale(toLight, -c[1] / toLight[1])));
         ctx.setLineDash([]);
@@ -144,7 +145,7 @@ export class DebugOverlay {
     if (!land) return;
     ctx.setLineDash(DASH);
     ctx.strokeStyle = OVERLAY.lineColor;
-    line(windowCenter(this.room), land);
+    line(apertureCenter(this.room), land);
     ctx.setLineDash([]);
 
     const [hx, hy] = P(land);

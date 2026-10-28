@@ -109,6 +109,8 @@ a:hover { text-decoration-color: var(--accent); }
 
 /* Geometry controls sit right under the image so they stay on screen while the panel scrolls. */
 .stage-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.stage-toolbar .scenes { margin-right: 6px; }
+.stage-toolbar .scenes .segment { flex: none; padding: 4px 12px; }
 .toggle-chip[aria-pressed='true'] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 500; }
 .edit-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 6px; margin-left: 10px; padding-left: 12px; border-left: 1px solid var(--line); }
 .edit-tools[hidden] { display: none; }
@@ -202,6 +204,8 @@ kbd {
 .toggle-row { grid-template-columns: 34px 4.5em minmax(0, 1fr) 3.2em; cursor: pointer; }
 .toggle-row .row-label { white-space: nowrap; }
 .toggle-row.is-off .range, .toggle-row.is-off .value { opacity: 0.35; }
+.toggle-row.is-unavailable { opacity: 0.4; cursor: default; }
+.toggle-row.is-unavailable .switch { cursor: default; }
 
 .range { width: 100%; accent-color: var(--accent); }
 
