@@ -33,7 +33,7 @@ npm run dev
 
 ## AI 重繪原圖
 
-`art/ai-albedo.png`（房間）與 `art/forest-ai-albedo.png`（樹林）是把各自的平光原圖（`art/flat-source.png`、`art/forest-flat-source.png`）交給 Atlas Cloud 的 `google/nano-banana-pro/edit` 重繪的結果：構圖不變、維持平光，光影仍然完全由代理幾何即時計算。面板上的「AI 原圖」可以切換回平光版本比較；迴廊目前沒有 AI 原圖。
+`art/ai-albedo.png`（房間）、`art/forest-ai-albedo.png`（樹林）、`art/cloister-ai-albedo.png`（迴廊）是把各自的平光原圖（`art/flat-source.png`、`art/forest-flat-source.png`、`art/cloister-flat-source.png`）交給 Atlas Cloud 的 `google/nano-banana-pro/edit` 重繪的結果：構圖不變、維持平光，光影仍然完全由代理幾何即時計算。面板上的「AI 原圖」可以切換回平光版本比較。
 
 重新產生（每張約 US$0.14，參數是場景名稱）：
 
@@ -43,6 +43,10 @@ node scripts/ai-repaint.mjs room
 
 ```bash
 node scripts/ai-repaint.mjs forest
+```
+
+```bash
+node scripts/ai-repaint.mjs cloister
 ```
 
 API 金鑰從 macOS 鑰匙圈讀取（service 名稱 `atlascloud-api-key`），不會寫進任何檔案。第一次使用先存入：

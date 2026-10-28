@@ -337,6 +337,7 @@ export const OVERLAY = { handleRadius: 9, label: { 'zh-TW': '直射光落點', e
 export const ART = {
   aiAlbedo: new URL('../art/ai-albedo.png', import.meta.url).href,
   forestAiAlbedo: new URL('../art/forest-ai-albedo.png', import.meta.url).href,
+  cloisterAiAlbedo: new URL('../art/cloister-ai-albedo.png', import.meta.url).href,
 };
 
 /* ----------------------------------------------------------------- editor */

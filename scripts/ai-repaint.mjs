@@ -2,7 +2,7 @@
 /**
  * Repaint the flat proxy render into richer pixel art with an Atlas Cloud image-edit model.
  *
- *   node scripts/ai-repaint.mjs [room|forest]
+ *   node scripts/ai-repaint.mjs [room|forest|cloister]
  *
  * The input is the scene's flat proxy render (the 原始 / albedo view, 1280x720).
  * The output keeps its exact layout/perspective, so the authored proxy geometry
@@ -57,6 +57,19 @@ const SCENES = {
       'the pale sky showing between the trees in exactly the same gaps, the low undergrowth, the two bushes, the two grey rocks and the dirt path.',
       'Add texture (bark, leaf clusters, ferns, grass tufts, pebbles) inside the existing shapes but do not move, resize or fill in the sky gaps.',
       'Muted deep green and earthy brown palette.',
+    ],
+  },
+  cloister: {
+    input: 'art/cloister-flat-source.png',
+    output: 'art/cloister-ai-albedo.png',
+    prompt: [
+      'Repaint this image as a detailed hand-made pixel art illustration of a gothic stone cloister walk.',
+      'Keep the exact same composition, camera, perspective and the position, size and silhouette of every element:',
+      'the arcade of pointed arches on the left wall with their stone tracery (mullions, small pointed lancets, round oculus with a quatrefoil) and the pale courtyard seen through them,',
+      'the square stone piers on both sides, the shallow blind arches on the right wall, the ribbed ceiling, the dark doorway at the far end,',
+      'and the tiled stone floor with its dark inlaid bands.',
+      'Add stone texture (ashlar blocks, worn edges, mortar lines, subtle moss in corners) but do not move or resize anything and keep the tracery openings exactly where they are.',
+      'Warm limestone palette.',
     ],
   },
 };
