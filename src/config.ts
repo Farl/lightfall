@@ -256,11 +256,11 @@ export const HOTKEYS = {
 
 /** Page copy and outbound links (index.html header is filled from these). */
 export const PAGE = {
-  documentTitle: { 'zh-TW': '房間光影 · Room Atmosphere 2D', en: 'Room Atmosphere 2D' } as Text,
-  title: { 'zh-TW': '房間光影', en: 'Room Atmosphere' } as Text,
+  documentTitle: { 'zh-TW': '光隙 · Lightfall', en: 'Lightfall' } as Text,
+  title: { 'zh-TW': '光隙', en: 'Lightfall' } as Text,
   subtitle: {
-    'zh-TW': '一張平光像素畫，加上 2.5D 幾何資料，就能即時打光。',
-    en: 'A flat-lit pixel painting, relit live from a little 2.5D geometry.',
+    'zh-TW': '一張平光像素畫，加上一點 2.5D 幾何資料，即時算出穿過窗戶、樹梢與窗花的光。',
+    en: 'A flat-lit pixel painting plus a little 2.5D geometry: light through windows, branches and tracery, computed live.',
   } as Text,
   referenceLabel: { 'zh-TW': '參考：@vux429 的 Threads 貼文', en: 'Reference: @vux429 on Threads' } as Text,
   referenceUrl: 'https://www.threads.com/@vux429/post/De7EVP5GFse',

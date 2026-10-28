@@ -1,5 +1,6 @@
 /**
- * Room Atmosphere 2D — a flat pixel-art room relit with fake 2.5D lighting.
+ * 光隙 · Lightfall (repo: room-atmosphere-2d) — flat pixel art relit with fake 2.5D lighting:
+ * light through windows, branches and tracery.
  * See docs/technique.md for how the pieces fit together.
  */
 import { RENDER, TIME_PLAY } from './config';
