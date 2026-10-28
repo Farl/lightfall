@@ -5,16 +5,18 @@
  *   depth     R = normalised 1/w
  *   normal    RGB = world normal * 0.5 + 0.5
  *   emissive  R = sky, G = lamp, B = TV coverage masks
- *   mask      (separate size) top-down leaf gaps of a canopy aperture, if any
+ *   occluders (RENDER.occluderResolution, one per layer) solid coverage of each
+ *             cut-out layer in its own (u, v), for the shader's shadow rays
  *
  * depth + normal together are the G-buffer the lighting shader reconstructs world
  * positions from. Every primitive goes through `fillPolygon`, so the three layers
  * can never disagree about coverage or draw order (painter's algorithm, far to near).
  */
-import { CAMERA, SCENE_RES } from '../config';
+import { CAMERA, RENDER, SCENE_RES } from '../config';
 import { depthCode, depthRange, project, viewDepth, type DepthRange } from '../camera';
 import { shadeHex, type Vec2, type Vec3 } from '../math';
-import { Emissive, FACE_SHADE, PLANE_NORMAL, planeExtent, planePoint, type BoxDef, type Bounds, type MaskDef, type Plane, type RoomData } from './roomData';
+import { Emissive, FACE_SHADE, PLANE_NORMAL, planeExtent, planePoint, planeUvPoint, type BoxDef, type Bounds, type OccluderLayer, type Plane, type RoomData } from './roomData';
+import { rasterizeLayer, shapeOutlines } from './shapes';
 
 /** Segments used to approximate a disc lying on a plane. */
 const DISC_SEGMENTS = 24;
@@ -44,12 +46,12 @@ export class SceneLayers {
   readonly depth = makeCanvas(true);
   readonly normal = makeCanvas(false);
   readonly emissive = makeCanvas(false);
-  /** Leaf-gap texture of a masked aperture; null for scenes without one. */
-  mask: HTMLCanvasElement | null = null;
-  /** Bumped whenever `mask` is redrawn, so the renderer re-uploads (and re-mips) only then. */
-  maskVersion = 0;
-  private maskSource: MaskDef | null = null;
-  private maskPixels: Uint8ClampedArray | null = null;
+  /** Shadow textures of the occluder layers (solid coverage, see shapes.ts), one canvas each. */
+  occluders: HTMLCanvasElement[] = [];
+  /** Bumped whenever `occluders` is redrawn, so the renderer re-uploads (and re-mips) only then. */
+  occluderVersion = 0;
+  private occluderSource: OccluderLayer[] | null = null;
+  private occluderPixels: Uint8ClampedArray[] = [];
   /** CPU copy of the depth layer, used to occlude dust particles. */
   private depthPixels: Uint8ClampedArray | null = null;
   private bounds!: Bounds;
@@ -62,7 +64,7 @@ export class SceneLayers {
   build(room: RoomData, painting: CanvasImageSource | null = null) {
     this.bounds = room.bounds;
     this.range = depthRange(room.bounds);
-    this.buildMask(room.aperture.mask ?? null);
+    this.buildOccluders(room.occluders);
     for (const layer of [this.albedo, this.depth, this.normal, this.emissive]) layer.ctx.clearRect(0, 0, SCENE_RES.width, SCENE_RES.height);
 
     for (const plane of SHELL_ORDER) {
@@ -70,11 +72,14 @@ export class SceneLayers {
       for (const d of room.decals) if (d.plane === plane) this.planeRect(plane, d.rect, d.color, d.emissive ?? Emissive.None);
       for (const d of room.discs) if (d.plane === plane) this.planeDisc(plane, d.center, d.radius, d.color, d.emissive ?? Emissive.None);
     }
+    // Layers lying on a wall or ceiling belong to the shell; camera-facing ones are sorted with the props.
+    for (const layer of room.occluders) if (layer.axis !== 2) this.occluder(layer);
 
-    // Boxes and blobs share one far-to-near list. Blobs sort by their near edge so foliage lands over its pot.
+    // Boxes, blobs and camera-facing layers share one far-to-near list. Blobs sort by their near edge so foliage lands over its pot.
     const drawables: { key: number; draw: () => void }[] = [
       ...room.boxes.filter((b) => !b.hidden).map((b) => ({ key: b.max[2], draw: () => this.box(b) })),
       ...room.blobs.map((b) => ({ key: b.center[2] - b.radius, draw: () => this.blob(b.center, b.radius, b.color, b.normal) })),
+      ...room.occluders.filter((l) => l.axis === 2).map((l) => ({ key: l.at, draw: () => this.occluder(l) })),
     ];
     drawables.sort((a, b) => b.key - a.key).forEach((d) => d.draw());
 
@@ -102,48 +107,35 @@ export class SceneLayers {
   }
 
   /**
-   * Leaf gaps as white discs on black, v growing down the canvas rows. Edits never touch
-   * the mask, so it is redrawn only when the scene (and with it the mask object) changes.
+   * Rasterise every occluder layer's shadow texture. Edits never touch the layers, so this
+   * runs only when the scene (and with it the occluder list object) changes.
    */
-  private buildMask(def: MaskDef | null) {
-    if (def === this.maskSource) return;
-    this.maskSource = def;
-    this.maskVersion++;
-    if (!def) {
-      this.mask = null;
-      this.maskPixels = null;
-      return;
-    }
-    const [w, h] = def.resolution;
-    const [u0, v0, u1, v1] = def.rect;
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d')!;
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, w, h);
-    ctx.fillStyle = '#fff';
-    const sx = w / (u1 - u0);
-    const sy = h / (v1 - v0);
-    for (const { center, radius } of def.holes) {
-      ctx.beginPath();
-      ctx.ellipse((center[0] - u0) * sx, (center[1] - v0) * sy, radius * sx, radius * sy, 0, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    this.mask = canvas;
-    this.maskPixels = ctx.getImageData(0, 0, w, h).data;
+  private buildOccluders(list: OccluderLayer[]) {
+    if (list === this.occluderSource) return;
+    this.occluderSource = list;
+    this.occluderVersion++;
+    const [w, h] = RENDER.occluderResolution;
+    this.occluders = list.map((layer) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      rasterizeLayer(layer, canvas.getContext('2d', { willReadFrequently: true })!, w, h);
+      return canvas;
+    });
+    this.occluderPixels = this.occluders.map((c) => c.getContext('2d')!.getImageData(0, 0, w, h).data);
   }
 
-  /** Leaf-gap coverage at an aperture (u, v), nearest texel; 0 outside the mask (closed canopy). */
-  readonly maskAt = (u: number, v: number): number => {
-    const def = this.maskSource;
-    if (!def || !this.maskPixels) return 1;
-    const [u0, v0, u1, v1] = def.rect;
-    const [w, h] = def.resolution;
+  /** Solid coverage (0..1) of occluder layer `i` at its (u, v), nearest texel; 0 outside its rect. */
+  readonly occluderAt = (i: number, u: number, v: number): number => {
+    const layer = this.occluderSource?.[i];
+    const pixels = this.occluderPixels[i];
+    if (!layer || !pixels) return 0;
+    const [u0, v0, u1, v1] = layer.rect;
+    const [w, h] = RENDER.occluderResolution;
     const x = Math.floor(((u - u0) / (u1 - u0)) * w);
-    const y = Math.floor(((v - v0) / (v1 - v0)) * h);
+    const y = Math.floor(((v1 - v) / (v1 - v0)) * h);
     if (x < 0 || y < 0 || x >= w || y >= h) return 0;
-    return this.maskPixels[(y * w + x) * 4] / 255;
+    return pixels[(y * w + x) * 4] / 255;
   };
 
   /* -------------------------------------------------------------- primitives */
@@ -161,6 +153,14 @@ export class SceneLayers {
       pts.push(planePoint(this.bounds, plane, cu + Math.cos(a) * r, cv + Math.sin(a) * r));
     }
     this.fillPolygon(pts, color, PLANE_NORMAL[plane], emissive);
+  }
+
+  /** A cut-out layer: its solid shapes, or for an inverted layer what shows through its holes. */
+  private occluder(layer: OccluderLayer) {
+    const { color, normal, emissive = Emissive.None } = layer.paint;
+    for (const outline of shapeOutlines(layer.shapes)) {
+      this.fillPolygon(outline.map(([u, v]) => planeUvPoint(layer, u, v)), color, normal, emissive);
+    }
   }
 
   /** Visible faces of an axis-aligned box, back faces culled against the camera. */

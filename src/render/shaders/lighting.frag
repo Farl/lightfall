@@ -3,15 +3,18 @@
 //
 // Inputs are Canvas2D layers (albedo, depth, normal, emissive) rasterised from the
 // authored 2.5D proxy data. Per pixel we rebuild the world position from depth,
-// then trace shadow rays analytically against the aperture (window panes or a
-// leaf-masked canopy) and the proxy boxes.
+// then trace shadow rays analytically against the aperture (the one opening the
+// light comes through), the proxy boxes, and flat cut-out layers (tree silhouettes,
+// window tracery) whose textures are sampled where the ray crosses them.
 // No meshes, no shadow maps: the scene is small enough to loop over every box.
 precision highp float;
+precision highp sampler2DArray;
 
 // Array sizes, injected from RENDER in config.ts.
 #define MAX_PANES __MAX_PANES__
 #define MAX_BOXES __MAX_BOXES__
 #define MAX_LAMPS __MAX_LAMPS__
+#define MAX_OCCLUDERS __MAX_OCCLUDERS__
 #define MAX_SHADOW_SAMPLES __MAX_SHADOW_SAMPLES__
 #define MAX_BEAM_STEPS __MAX_BEAM_STEPS__
 
@@ -25,7 +28,7 @@ uniform sampler2D uDepth;
 uniform sampler2D uNormal;
 uniform sampler2D uEmissive;   // R sky, G lamp, B tv coverage
 uniform sampler2D uDust;
-uniform sampler2D uMask;      // leaf gaps of a masked aperture (mipmapped; level = sun-disc blur)
+uniform sampler2DArray uOccluders;  // solid coverage per cut-out layer (mipmapped; level = sun-disc blur)
 
 uniform vec2 uRes;
 uniform vec2 uCenter;
@@ -43,16 +46,17 @@ uniform vec3 uAmbientSky;
 uniform vec3 uAmbientGround;
 uniform vec3 uBounce;
 
-// Aperture plane: axis 0 -> x = at, (u, v) = (z, y); axis 1 -> y = at, (u, v) = (x, z).
+// Planes: axis 0 -> x = at, (u, v) = (z, y); 1 -> y = at, (x, z); 2 -> z = at, (x, y).
 uniform int uApertureAxis;
 uniform float uApertureAt;
 uniform int uPaneCount;
 uniform vec4 uPanes[MAX_PANES];   // u0, v0, u1, v1
-uniform int uMaskOn;
-uniform vec4 uMaskRect;           // (u, v) area covered by uMask
-uniform float uMaskSoftness;      // blur radius per unit distance from the aperture
-uniform float uMaskTexelsPerUnit;
-uniform vec2 uWind;               // amplitude, speed
+uniform int uOccluderCount;
+uniform vec2 uOccluderPlane[MAX_OCCLUDERS];  // axis, at
+uniform vec4 uOccluderRect[MAX_OCCLUDERS];   // (u, v) area its texture covers
+uniform vec3 uOccluderBlur[MAX_OCCLUDERS];   // texels of blur per unit distance, wind amplitude, wind speed
+uniform float uPhaseG;            // Henyey-Greenstein anisotropy of the air (0 = isotropic, >0 = glows toward the light)
+uniform vec3 uSun;                // visible sun in the sky: disc gain, disc sharpness, halo gain
 uniform int uBoxCount;
 uniform vec3 uBoxMin[MAX_BOXES];
 uniform vec3 uBoxMax[MAX_BOXES];
@@ -130,43 +134,62 @@ bool blocked(vec3 o, vec3 d, float tMax) {
   return false;
 }
 
-// Wind sway of the leaf mask; mirrors windOffset() in lighting.ts.
-vec2 windOffset(vec2 uv) {
-  return uWind.x * vec2(sin(uTime * uWind.y + uv.y * 0.9), cos(uTime * uWind.y * 0.83 + uv.x * 0.7));
+float axisOf(vec3 p, int a) { return a == 0 ? p.x : (a == 1 ? p.y : p.z); }
+vec2 planeUv(vec3 q, int a) { return a == 0 ? q.zy : (a == 1 ? q.xz : q.xy); }
+
+// Wind sway (u offset) of a layer at height v; mirrors windOffset() in lighting.ts.
+float windOffset(float v, vec3 blur) { return blur.y * sin(uTime * blur.z + v * 0.9); }
+
+// Fraction of light that gets through every cut-out layer between `o` and the aperture.
+// Each gap is a pinhole: its spot is the sun disc, blurred by distance * softness,
+// which is what the mip level of a box-filtered coverage texture approximates.
+float occluderTransmit(vec3 o, vec3 L, float tMax) {
+  float transmit = 1.0;
+  for (int i = 0; i < MAX_OCCLUDERS; i++) {
+    if (i >= uOccluderCount) break;
+    int axis = int(uOccluderPlane[i].x);
+    float la = axisOf(L, axis);
+    if (abs(la) < 1e-4) continue;
+    float t = (uOccluderPlane[i].y - axisOf(o, axis)) / la;
+    // Skip crossings at the origin: a ray starting on a painted layer must not shadow itself.
+    if (t <= 0.02 || t >= tMax) continue;
+    vec2 uv = planeUv(o + L * t, axis);
+    vec3 blur = uOccluderBlur[i];
+    uv.x += windOffset(uv.y, blur);
+    vec4 r = uOccluderRect[i];
+    // Texture rows grow down from the top of the rect (see rasterizeLayer).
+    vec2 st = vec2((uv.x - r.x) / (r.z - r.x), (r.w - uv.y) / (r.w - r.y));
+    if (any(lessThan(st, vec2(0.0))) || any(greaterThan(st, vec2(1.0)))) continue;
+    float lod = log2(max(t * blur.x, 1.0));
+    transmit *= 1.0 - textureLod(uOccluders, vec3(st, float(i)), lod).r;
+    if (transmit <= 0.002) return 0.0;
+  }
+  return transmit;
 }
 
-// Leaf-gap coverage where the ray crossed the canopy, `dist` away from the shaded point.
-// Every gap acts as a pinhole: its spot is the sun disc, blurred by distance * softness,
-// which is exactly what the mip level of a box-filtered mask approximates.
-float leafGaps(vec2 hit, float dist) {
-  vec2 p = hit + windOffset(hit);
-  vec2 uv = (p - uMaskRect.xy) / (uMaskRect.zw - uMaskRect.xy);
-  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return 0.0;
-  float lod = log2(max(dist * uMaskSoftness * uMaskTexelsPerUnit, 1.0));
-  // The mask canvas grows v downward and is uploaded flipped.
-  return textureLod(uMask, vec2(uv.x, 1.0 - uv.y), lod).r;
-}
-
-// Light (0..1) reaching `o`: the ray toward the light has to cross the aperture inside a pane,
-// through a leaf gap if masked, without hitting a box. `hit` = (u, v) on the aperture plane.
+// Light (0..1) reaching `o`: the ray toward the light has to cross the aperture inside a pane
+// without hitting a box, dimmed by the cut-out layers. `hit` = (u, v) on the aperture plane.
 float lightVisible(vec3 o, vec3 L, out vec2 hit) {
   hit = vec2(0.0);
-  float la = uApertureAxis == 0 ? L.x : L.y;
+  float la = axisOf(L, uApertureAxis);
   if (abs(la) < 1e-4) return 0.0;
-  float t = (uApertureAt - (uApertureAxis == 0 ? o.x : o.y)) / la;
+  float t = (uApertureAt - axisOf(o, uApertureAxis)) / la;
   if (t <= 0.0) return 0.0;
-  vec3 q = o + L * t;
-  hit = uApertureAxis == 0 ? q.zy : q.xz;
+  hit = planeUv(o + L * t, uApertureAxis);
   bool inside = false;
   for (int i = 0; i < MAX_PANES; i++) {
     if (i >= uPaneCount) break;
     vec4 p = uPanes[i];
     inside = inside || (hit.x >= p.x && hit.x <= p.z && hit.y >= p.y && hit.y <= p.w);
   }
-  if (!inside) return 0.0;
-  float m = uMaskOn == 1 ? leafGaps(hit, t) : 1.0;
-  if (m <= 0.002) return 0.0;
-  return blocked(o, L, t) ? 0.0 : m;
+  if (!inside || blocked(o, L, t)) return 0.0;
+  return occluderTransmit(o, L, t);
+}
+
+// Henyey-Greenstein phase, scaled so g = 0 gives 1 (the room's isotropic look stays as it was).
+float phase(float cosTheta) {
+  float g = uPhaseG;
+  return (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * cosTheta, 1.5);
 }
 
 // Streaky "dirty glass" modulation, keyed on where the ray crosses the aperture,
@@ -232,6 +255,9 @@ void main() {
 
   vec3 color = albedo * (ambient + direct + lamp);
   vec3 sky = albedo * mix(uSkyBottom, uSkyTop, clamp((P.y - uSkyRange.x) / (uSkyRange.y - uSkyRange.x), 0.0, 1.0));
+  // The sun itself, seen in the sky between the silhouettes: a disc plus a wide halo.
+  float toSun = max(dot(normalize(rd), L), 0.0);
+  sky += uLightColor * (uSun.x * pow(toSun, uSun.y) + uSun.z * pow(toSun, 6.0));
   color = mix(color, sky, emit.r);
   color += albedo * uLampEmit * emit.g;
   color += albedo * uTvEmit * (0.85 + 0.15 * sin(uTime * uTvFlicker)) * emit.b;
@@ -251,7 +277,7 @@ void main() {
         acc += v * dens * shaft(hit);
       }
     }
-    color += uLightColor * acc * seg * length(rd) * uBeamDensity;
+    color += uLightColor * acc * seg * length(rd) * uBeamDensity * phase(dot(normalize(rd), L));
   }
 
   // Dust motes: R lit by the beam, G ambient-only.

@@ -4,11 +4,14 @@
  */
 import { BOUNCE_GAIN, LAMP_LIGHT, TIME_KEYS, ATMOSPHERE, type TimeKey } from './config';
 import { add, clamp, deg, lerp, lerp3, normalize, scale, sub, type Vec3 } from './math';
-import { apertureCenter, apertureInward, apertureUv, type MaskDef, type RoomData } from './scene/roomData';
+import { apertureInward, lightAnchor, planeUv, type OccluderLayer, type RoomData } from './scene/roomData';
 import type { Celestial, SceneDef } from './scene/scenes';
 
-/** Leaf-gap coverage (0..1) at an aperture (u, v); supplied by SceneLayers from the mask texture. */
-export type MaskSampler = (u: number, v: number) => number;
+/** Solid coverage (0..1) of occluder layer `i` at its (u, v); supplied by SceneLayers from the layer textures. */
+export type OccluderSampler = (i: number, u: number, v: number) => number;
+
+/** Shadow rays start on painted layers; crossings closer than this are the layer itself. */
+const SELF_CROSSING = 0.02;
 
 export interface LightingState {
   /** Unit vector pointing toward the light source (sun or moon). */
@@ -87,30 +90,35 @@ export function lightingAt(hour: number, override: Vec3 | null, scene: SceneDef,
   };
 }
 
-/** Wind sway of the leaf mask at an aperture (u, v). Mirrors windOffset() in lighting.frag. */
-export function windOffset(mask: MaskDef, u: number, v: number, time: number): [number, number] {
-  const { amplitude: a, speed: s } = mask.wind;
-  return [a * Math.sin(time * s + v * 0.9), a * Math.cos(time * s * 0.83 + u * 0.7)];
+/** Wind sway (u offset) of a layer at height v. Mirrors windOffset() in lighting.frag. */
+export function windOffset(layer: OccluderLayer, v: number, time: number): number {
+  if (!layer.wind) return 0;
+  const { amplitude, speed } = layer.wind;
+  return amplitude * Math.sin(time * speed + v * 0.9);
 }
 
 /**
- * Light reaching `o` (0..1): the ray toward the light must cross the aperture inside a pane,
- * through a leaf gap if the aperture is masked, without hitting a box. Mirrors lightVisible()
- * in lighting.frag, minus the distance blur of the mask (dust only needs a yes/no).
+ * Light reaching `o` (0..1): the ray toward the light must cross the aperture inside a pane
+ * without hitting a box, and is dimmed by every cut-out layer it crosses on the way.
+ * Mirrors lightVisible() in lighting.frag, minus the distance blur (dust only needs a yes/no).
  */
-export function lightVisible(o: Vec3, toLight: Vec3, room: RoomData, maskAt: MaskSampler | null = null, time = 0): number {
+export function lightVisible(o: Vec3, toLight: Vec3, room: RoomData, occluderAt: OccluderSampler | null = null, time = 0): number {
   const a = room.aperture;
   const t = (a.at - o[a.axis]) / toLight[a.axis];
   if (!(t > 0) || !Number.isFinite(t)) return 0;
-  const [u, v] = apertureUv(a, add(o, scale(toLight, t)));
+  const [u, v] = planeUv(a, add(o, scale(toLight, t)));
   if (!a.panes.some(([u0, v0, u1, v1]) => u >= u0 && u <= u1 && v >= v0 && v <= v1)) return 0;
-  let m = 1;
-  if (a.mask && maskAt) {
-    const [du, dv] = windOffset(a.mask, u, v, time);
-    m = maskAt(u + du, v + dv);
-    if (m <= 0) return 0;
+  if (room.boxes.some((b) => rayHitsBox(o, toLight, t, b.min, b.max))) return 0;
+  let transmit = 1;
+  if (occluderAt) {
+    room.occluders.forEach((layer, i) => {
+      const tl = (layer.at - o[layer.axis]) / toLight[layer.axis];
+      if (!(tl > SELF_CROSSING && tl < t)) return;
+      const [lu, lv] = planeUv(layer, add(o, scale(toLight, tl)));
+      transmit *= 1 - occluderAt(i, lu + windOffset(layer, lv, time), lv);
+    });
   }
-  return room.boxes.some((b) => rayHitsBox(o, toLight, t, b.min, b.max)) ? 0 : m;
+  return transmit;
 }
 
 /** Slab test. Like the shader, a box containing the origin does not count (near must be > 0). */
@@ -135,7 +143,7 @@ function rayHitsBox(o: Vec3, d: Vec3, tMax: number, min: Vec3, max: Vec3): boole
 /** Where the ray through the aperture center lands on the floor (the draggable 直射光落點). */
 export function landingPoint(room: RoomData, toLight: Vec3): Vec3 | null {
   if (toLight[1] <= 1e-4) return null;
-  const c = apertureCenter(room);
+  const c = lightAnchor(room);
   return add(c, scale(toLight, -c[1] / toLight[1]));
 }
 
@@ -146,5 +154,5 @@ const LANDING_MARGIN = 0.2;
 export function directionToLanding(room: RoomData, p: Vec3): Vec3 | null {
   const a = room.aperture;
   if ((p[a.axis] - a.at) * apertureInward(room) <= LANDING_MARGIN) return null;
-  return normalize(sub(apertureCenter(room), p));
+  return normalize(sub(lightAnchor(room), p));
 }

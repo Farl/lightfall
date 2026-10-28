@@ -78,7 +78,7 @@ export class DustField {
       if (layers.depthCode(m.p) < layers.depthAt(sx, sy) - OCCLUSION_SLACK) continue;
       const twinkle = 0.55 + 0.45 * Math.sin(time * TWINKLE_SPEED + m.phase * 7);
       const v = Math.round(255 * twinkle);
-      ctx.fillStyle = lightVisible(m.p, toLight, room, layers.maskAt, time) > 0 ? `rgb(${v},0,0)` : `rgb(0,${v},0)`;
+      ctx.fillStyle = lightVisible(m.p, toLight, room, layers.occluderAt, time) > 0.5 ? `rgb(${v},0,0)` : `rgb(0,${v},0)`;
       const size = Math.min(MAX_MOTE_PX, Math.max(1, (CAMERA.focal * MOTE_SIZE) / viewDepth(m.p)));
       ctx.fillRect(Math.floor(sx), Math.floor(sy), size, size);
     }

@@ -52,9 +52,12 @@ export const CAMERA = {
 
 export const RENDER = {
   /** Compile-time array sizes in the lighting shader. Room data must fit. */
-  maxPanes: 4,
+  maxPanes: 6,
   maxBoxes: 32,
   maxLamps: 4,
+  /** Cut-out layers (tree silhouettes, tracery) per scene, and their shared shadow-texture size. */
+  maxOccluders: 4,
+  occluderResolution: [1024, 512] as [number, number],
   maxShadowSamples: 8,
   maxBeamSteps: 48,
 
@@ -135,6 +138,8 @@ export const ATMOSPHERE = {
   dustLitGain: 2.4,
   dustAmbientGain: 0.5,
   dustDrift: 0.08,
+  /** Henyey-Greenstein g of the air: 0 scatters evenly, toward 1 the beams glow when you look into the light. */
+  phaseG: 0,
 };
 
 /* ------------------------------------------------------------------ grading */
@@ -326,10 +331,13 @@ export const OVERLAY = { handleRadius: 9, label: { 'zh-TW': '直射光落點', e
 /* -------------------------------------------------------------------- art */
 
 /**
- * AI-repainted base painting (scripts/ai-repaint.mjs). It replaces the flat albedo of the
- * room; the proxy geometry still drives depth, normals and shadows underneath it.
+ * AI-repainted base paintings (scripts/ai-repaint.mjs <scene>). Each replaces the flat albedo of
+ * its scene; the proxy geometry still drives depth, normals and shadows underneath it.
  */
-export const ART = { aiAlbedo: new URL('../art/ai-albedo.png', import.meta.url).href };
+export const ART = {
+  aiAlbedo: new URL('../art/ai-albedo.png', import.meta.url).href,
+  forestAiAlbedo: new URL('../art/forest-ai-albedo.png', import.meta.url).href,
+};
 
 /* ----------------------------------------------------------------- editor */
 

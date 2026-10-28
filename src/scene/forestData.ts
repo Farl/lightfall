@@ -1,146 +1,105 @@
 /**
- * Forest clearing: the same shell-of-planes idea as the room, read as outdoors.
- * The ceiling is the canopy and the only opening: a masked aperture whose leaf gaps
- * let the sun through, so beams and floor dapples come from the mask instead of a
- * window. The far planes are painted as receding tree lines; trunks are proxy boxes
- * that throw real shadows across the dapples.
+ * Backlit forest: the sun hangs low behind the trees and shines toward the camera.
+ * The opening is the far sky plane; between it and the camera stand three flat
+ * silhouette layers (far canopy, middle trees, near trees). Light reaches a point
+ * only through the gaps of every layer it crosses, so shafts fan out from the sun
+ * and stripe the ground; the forward-scattering air makes them glow toward the sun.
+ *
+ * The shell is made wide and tall enough that its side walls and ceiling stay off
+ * screen: all that is seen is ground, the layers, and sky.
  */
 import type { Vec3 } from '../math';
-import { box, Emissive, type BlobDef, type BoxDef, type Bounds, type DecalDef, type DiscDef, type MaskDef, type RoomData } from './roomData';
+import { box, Emissive, type BlobDef, type BoxDef, type Bounds, type DecalDef, type OccluderLayer, type Rect, type RoomData } from './roomData';
+import { emptyShapes, mergeShapes, rng, tree, type Rng, type TreeStyle } from './shapes';
 
-const FOREST: Bounds = { width: 12, height: 6, depth: 9, near: -1.6 };
+const FOREST: Bounds = { width: 26, height: 14, depth: 10, near: -1.6 };
 const HALF_W = FOREST.width / 2;
 
 const PALETTE = {
-  ground: '#4b5634',
-  moss: ['#56663a', '#5f6f3f', '#46532f'],
-  litter: '#6a5638',
-  path: '#7d6848',
-  canopy: '#1d2a1b',
-  gap: '#d9ead8',
-  farTrees: '#33463a',
-  farTrunk: '#425246',
-  sideTrees: '#26362a',
-  sideTrunk: '#334332',
-  trunk: ['#4d4236', '#453c31', '#574a3b'],
-  rock: '#7b7a70',
-  leaves: ['#3f6a35', '#4c7a3b', '#365c2f', '#5b8a45'],
+  sky: '#f3ead2',
+  ground: '#3f4a2c',
+  moss: ['#4a5832', '#44502e', '#38432a'],
+  path: '#6b5a3e',
+  /** Atmospheric perspective: far layers are hazier, near ones nearly black. */
+  far: '#56624c',
+  mid: '#36412f',
+  near: '#1f261c',
+  rock: '#5f5f57',
+  leaves: ['#2b3a24', '#33452a', '#26331f'],
 };
 
-/* ------------------------------------------------------------------ canopy */
+/** Silhouette layers: depth (z), shadow blur per unit distance, and leaf sway. */
+const LAYERS = {
+  far: { z: 9.6, softness: 0.02, wind: { amplitude: 0.05, speed: 0.9 } },
+  mid: { z: 6.2, softness: 0.02, wind: { amplitude: 0.04, speed: 1.1 } },
+  near: { z: 2.6, softness: 0.02, wind: { amplitude: 0.03, speed: 1.3 } },
+};
+/** World (x, y) area every layer texture covers: wider than the view so low sun from the side still crosses it. */
+const LAYER_RECT: Rect = [-HALF_W, 0, HALF_W, 13];
+const SEED = 11;
 
-/**
- * The mask has to cover where low sun rays cross the canopy, which reaches well
- * beyond the visible shell (sun from the left: far to -x, plus the azimuth swing in z).
- */
-const CANOPY = {
-  rect: [-17, -7, 7, 17] as [number, number, number, number],
-  resolution: [1024, 1024] as [number, number],
-  seed: 7,
-  /** Sparse on purpose: every point of the air sees the canopy, so coverage turns straight into haze. */
-  clusters: 75,
-  holesPerCluster: [3, 9],
-  clusterSpread: 0.9,
-  /** Small gaps mostly add floor dapples; their shafts stay thin and faint. */
-  holeRadius: [0.035, 0.13],
-  /** A few large gaps make the strong shafts. */
-  bigGaps: 7,
-  bigGapRadius: [0.22, 0.4],
-  softness: 0.012,
-  wind: { amplitude: 0.05, speed: 1.1 },
+/* -------------------------------------------------------------- silhouettes */
+
+const STYLE: Record<keyof typeof LAYERS, TreeStyle> = {
+  far: { trunkHeight: 3.2, trunkWidth: 0.22, levels: 3, branchLength: 1.6, forkAngle: [0.25, 0.55], lengthDecay: 0.72, widthDecay: 0.62, leafCount: [6, 11], leafRadius: [0.35, 0.8], leafSpread: 1.1 },
+  mid: { trunkHeight: 3.4, trunkWidth: 0.3, levels: 4, branchLength: 1.5, forkAngle: [0.3, 0.7], lengthDecay: 0.74, widthDecay: 0.6, leafCount: [3, 7], leafRadius: [0.18, 0.45], leafSpread: 0.6 },
+  near: { trunkHeight: 2.6, trunkWidth: 0.34, levels: 4, branchLength: 1.4, forkAngle: [0.35, 0.8], lengthDecay: 0.72, widthDecay: 0.6, leafCount: [2, 5], leafRadius: [0.12, 0.3], leafSpread: 0.45 },
 };
 
-/** Deterministic RNG (mulberry32) so the canopy is the same on every load. */
-function rng(seed: number) {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+/** Low undergrowth along the bottom of a layer. */
+function undergrowth(r: Rng, from: number, to: number, height: number, radius: [number, number]) {
+  const s = emptyShapes();
+  for (let x = from; x < to; x += r.between(0.25, 0.6)) s.discs.push({ center: [x, r.between(0, height)], radius: r.between(...radius) });
+  return s;
 }
 
-function canopyMask(): MaskDef {
-  const random = rng(CANOPY.seed);
-  const between = ([lo, hi]: number[]) => lo + random() * (hi - lo);
-  const [u0, v0, u1, v1] = CANOPY.rect;
-  const holes: MaskDef['holes'] = [];
-  const at = (): [number, number] => [between([u0, u1]), between([v0, v1])];
-  for (let c = 0; c < CANOPY.clusters; c++) {
-    const [cu, cv] = at();
-    const n = Math.round(between(CANOPY.holesPerCluster));
-    for (let i = 0; i < n; i++) {
-      const a = random() * Math.PI * 2;
-      const d = Math.sqrt(random()) * CANOPY.clusterSpread;
-      holes.push({ center: [cu + Math.cos(a) * d, cv + Math.sin(a) * d], radius: between(CANOPY.holeRadius) });
-    }
-  }
-  for (let i = 0; i < CANOPY.bigGaps; i++) holes.push({ center: at(), radius: between(CANOPY.bigGapRadius) });
-  return { rect: CANOPY.rect, resolution: CANOPY.resolution, holes, softness: CANOPY.softness, wind: CANOPY.wind };
+function farCanopy(r: Rng) {
+  // A dense band of crowns with trunks below; gaps between crowns are where the sun breaks through.
+  const trees = [-11, -8.4, -6.1, -3.6, -1.3, 1.6, 3.9, 6.6, 9.1, 11.5].map((x) => tree(x + r.between(-0.4, 0.4), STYLE.far, r, r.between(-0.08, 0.08)));
+  return mergeShapes(...trees, undergrowth(r, -HALF_W, HALF_W, 1.6, [0.4, 0.9]));
 }
 
-const MASK = canopyMask();
+function midTrees(r: Rng) {
+  const trees = [-7.2, -4.6, -2.2, 0.9, 3.4, 6.0].map((x) => tree(x + r.between(-0.3, 0.3), STYLE.mid, r, r.between(-0.12, 0.12)));
+  return mergeShapes(...trees, undergrowth(r, -9, 9, 0.9, [0.25, 0.55]));
+}
 
-/** Leaf gaps lying wholly on the visible canopy are painted as bright sky specks. */
-const canopyGaps = (): DiscDef[] =>
-  MASK.holes
-    .filter(({ center: [x, z], radius }) => Math.abs(x) < HALF_W - radius && z > FOREST.near + radius && z < FOREST.depth - radius)
-    .map(({ center, radius }) => ({ plane: 'ceiling', center, radius, color: PALETTE.gap, emissive: Emissive.Sky }));
+function nearTrees(r: Rng) {
+  // Two framing trees leaning in from the sides, like standing at the edge of a clearing.
+  return mergeShapes(tree(-3.3, STYLE.near, r, 0.12), tree(3.6, STYLE.near, r, -0.1));
+}
 
-/* ----------------------------------------------------------------- ground */
+const layer = (key: keyof typeof LAYERS, shapes: OccluderLayer['shapes'], color: string): OccluderLayer => ({
+  axis: 2,
+  at: LAYERS[key].z,
+  rect: LAYER_RECT,
+  shapes,
+  // Backlit: the normal faces the camera, away from the sun, so the silhouettes stay dark.
+  paint: { color, normal: [0, 0.25, -1] },
+  softness: LAYERS[key].softness,
+  wind: LAYERS[key].wind,
+});
+
+function silhouettes(): OccluderLayer[] {
+  const r = rng(SEED);
+  return [layer('far', farCanopy(r), PALETTE.far), layer('mid', midTrees(r), PALETTE.mid), layer('near', nearTrees(r), PALETTE.near)];
+}
+
+/* ------------------------------------------------------------------ ground */
 
 const groundDecals = (): DecalDef[] => [
-  // Moss and leaf-litter patches, then a winding dirt path drawn as offset steps.
-  { plane: 'floor', rect: [-5.5, 0.5, -2.2, 3.5], color: PALETTE.moss[0] },
-  { plane: 'floor', rect: [2.0, 1.0, 5.5, 4.2], color: PALETTE.moss[1] },
-  { plane: 'floor', rect: [-4.5, 5.0, -1.0, 8.5], color: PALETTE.moss[2] },
-  { plane: 'floor', rect: [1.5, 5.5, 4.8, 8.8], color: PALETTE.litter },
+  // The whole far plane is sky: the only light source and what shows between the silhouettes.
+  { plane: 'back', rect: [-HALF_W, 0, HALF_W, FOREST.height], color: PALETTE.sky, emissive: Emissive.Sky },
+  { plane: 'floor', rect: [-6, 0.5, -1.8, 4.5], color: PALETTE.moss[0] },
+  { plane: 'floor', rect: [1.6, 1.2, 6.5, 5.5], color: PALETTE.moss[1] },
+  { plane: 'floor', rect: [-9, 5.5, 9, 10], color: PALETTE.moss[2] },
   ...[
-    [-0.9, -1.6, 0.5, 1.2],
-    [-0.6, 1.2, 0.8, 3.0],
-    [-0.1, 3.0, 1.1, 4.8],
-    [0.2, 4.8, 1.2, 6.6],
-    [-0.2, 6.6, 0.8, 9.0],
+    [-0.8, -1.6, 0.6, 1.5],
+    [-0.4, 1.5, 0.9, 3.4],
+    [0.1, 3.4, 1.0, 5.6],
+    [-0.2, 5.6, 0.6, 10],
   ].map((rect): DecalDef => ({ plane: 'floor', rect: rect as DecalDef['rect'], color: PALETTE.path })),
 ];
-
-/** Distant trunks as vertical strips on the far planes (the tree line fading into haze). */
-function treeLine(): DecalDef[] {
-  const strips: DecalDef[] = [];
-  const random = rng(CANOPY.seed + 1);
-  for (let x = -HALF_W + 0.4; x < HALF_W; x += 0.7 + random() * 0.9) {
-    const w = 0.12 + random() * 0.22;
-    strips.push({ plane: 'back', rect: [x, 0, x + w, FOREST.height], color: PALETTE.farTrunk });
-  }
-  for (const plane of ['left', 'right'] as const) {
-    for (let z = 0.5; z < FOREST.depth; z += 0.8 + random() * 1.0) {
-      const w = 0.18 + random() * 0.3;
-      strips.push({ plane, rect: [z, 0, z + w, FOREST.height], color: PALETTE.sideTrunk });
-    }
-  }
-  return strips;
-}
-
-/* ------------------------------------------------------------------ props */
-
-/** Trunks stop just under the canopy so edit clamping (EDITOR.wallMargin) never sinks them. */
-const TRUNK_TOP = FOREST.height - 0.05;
-
-const trunks: [string, number, number, number][] = [
-  // name, x, z, half width
-  ['trunkA', -4.3, 2.0, 0.34],
-  ['trunkB', -1.9, 5.4, 0.26],
-  ['trunkC', 1.6, 2.6, 0.4],
-  ['trunkD', 3.9, 6.6, 0.3],
-  ['trunkE', 4.9, 1.2, 0.45],
-  ['trunkF', -3.2, 7.8, 0.22],
-  ['trunkG', 0.4, 8.1, 0.2],
-];
-
-const trunkBoxes = (): BoxDef[] =>
-  trunks.map(([name, x, z, r], i) => box(name, [x - r, 0, z - r], [x + r, TRUNK_TOP, z + r], PALETTE.trunk[i % PALETTE.trunk.length]));
 
 /** Bush = a few leaf blobs plus one hidden box that casts their shadow. */
 function bush(group: string, [x, y, z]: Vec3, size: number): { blobs: BlobDef[]; proxy: BoxDef } {
@@ -154,28 +113,30 @@ function bush(group: string, [x, y, z]: Vec3, size: number): { blobs: BlobDef[];
     center: [x + dx * size, y + dy * size, z + dz * size],
     radius: s * size * 0.6,
     color: PALETTE.leaves[i % PALETTE.leaves.length],
-    normal: [0.2 * (dx || 0.5), 0.75, -0.6],
+    // Backlit: the tops catch a little light, the faces stay in shade.
+    normal: [0.2 * (dx || 0.5), 0.6, 0.75],
     group,
   }));
   const proxy = box(`${group}Proxy`, [x - size, 0, z - size * 0.5], [x + size, y + size * 0.6, z + size * 0.5], '#000000', { hidden: true, group });
   return { blobs, proxy };
 }
 
-const bushes = [bush('bushA', [-2.6, 0.45, 3.0], 0.75), bush('bushB', [2.9, 0.5, 4.8], 0.85), bush('bushC', [-5.0, 0.55, 6.2], 0.9)];
+const bushes = [bush('bushA', [-2.2, 0.4, 1.2], 0.7), bush('bushB', [2.4, 0.45, 2.0], 0.8)];
 
 export const FOREST_DATA: RoomData = {
   bounds: FOREST,
-  shell: { floor: PALETTE.ground, ceiling: PALETTE.canopy, back: PALETTE.farTrees, left: PALETTE.sideTrees, right: PALETTE.sideTrees },
-  decals: [...groundDecals(), ...treeLine()],
-  discs: canopyGaps(),
+  shell: { floor: PALETTE.ground, ceiling: PALETTE.near, back: PALETTE.sky, left: PALETTE.near, right: PALETTE.near },
+  decals: groundDecals(),
+  discs: [],
   boxes: [
-    ...trunkBoxes(),
-    box('rockA', [0.6, 0, 1.3], [1.25, 0.38, 1.85], PALETTE.rock, { group: 'rocks' }),
-    box('rockB', [1.1, 0, 1.6], [1.45, 0.22, 2.0], PALETTE.rock, { group: 'rocks' }),
-    box('rockC', [-1.4, 0, 4.0], [-0.8, 0.28, 4.45], PALETTE.rock),
+    box('rockA', [0.9, 0, 1.0], [1.5, 0.32, 1.5], PALETTE.rock, { group: 'rocks' }),
+    box('rockB', [-1.3, 0, 3.4], [-0.8, 0.24, 3.8], PALETTE.rock),
     ...bushes.map((b) => b.proxy),
   ],
   blobs: bushes.flatMap((b) => b.blobs),
-  aperture: { axis: 1, at: FOREST.height, panes: [MASK.rect], mask: MASK },
+  aperture: { axis: 2, at: FOREST.depth, panes: [[-HALF_W, 0, HALF_W, FOREST.height]] },
+  occluders: silhouettes(),
+  // Low sun behind a far plane: hang the landing handle low so it lands on the visible ground.
+  lightAnchor: [0, 1.5, FOREST.depth],
   lamps: [],
 };

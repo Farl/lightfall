@@ -77,33 +77,49 @@ export interface BlobDef {
 export type Rect = [number, number, number, number];
 
 /**
- * Leaf gaps of a canopy: the open parts of a masked aperture. Rasterised into a
- * texture whose mip level is chosen by distance, so spots blur the farther they
- * land from the leaves (sun-disc "pinhole" dapples, 木漏れ日).
+ * Axis-aligned plane `axis = at`, with its own (u, v):
+ *   axis 0 (x = at): (z, y)     a side wall
+ *   axis 1 (y = at): (x, z)     a ceiling / canopy
+ *   axis 2 (z = at): (x, y)     a plane facing the camera
  */
-export interface MaskDef {
-  /** Aperture (u, v) area the texture covers; outside it the canopy is closed. */
-  rect: Rect;
-  /** Texture size in texels. */
-  resolution: [number, number];
-  holes: { center: [number, number]; radius: number }[];
-  /** Blur radius = distance from the canopy * this (angular size of the sun disc). */
-  softness: number;
-  /** Sway of the mask in world units, and its angular speed. */
-  wind: { amplitude: number; speed: number };
+export interface PlaneDef {
+  axis: 0 | 1 | 2;
+  at: number;
+}
+
+/** The opening the sun/moon shines through: a plane with open rects. Nothing reaches the scene any other way. */
+export interface ApertureDef extends PlaneDef {
+  panes: Rect[];
+}
+
+export type Uv = [number, number];
+
+/** 2D shapes in a plane's (u, v): bars and branches (polylines with a width), round clumps, and outlines. */
+export interface LayerShapes {
+  strokes: { points: Uv[]; width: number }[];
+  discs: { center: Uv; radius: number }[];
+  polygons: Uv[][];
 }
 
 /**
- * The opening the sun/moon shines through: an axis-aligned plane with open rects.
- *   axis 0 (x = at): a wall window, panes in (z, y)
- *   axis 1 (y = at): a canopy overhead, panes in (x, z)
- * With a mask, light inside a pane is further multiplied by the leaf-gap texture.
+ * A flat cut-out standing between the light and the scene: tree silhouettes,
+ * window tracery. It is both painted (as polygons, in perspective) and rasterised
+ * into a texture in its own (u, v), which the shader samples where a shadow ray
+ * crosses the plane. The texture's mip level is picked by distance, so every gap
+ * acts as a pinhole: spots blur and grow the farther they land from the layer.
  */
-export interface ApertureDef {
-  axis: 0 | 1;
-  at: number;
-  panes: Rect[];
-  mask?: MaskDef;
+export interface OccluderLayer extends PlaneDef {
+  /** (u, v) area the texture covers; outside it the layer has no effect. */
+  rect: Rect;
+  shapes: LayerShapes;
+  /** false: the shapes are solid. true: the shapes are the holes of an otherwise solid layer (window openings). */
+  invert?: boolean;
+  /** What gets painted: the solid shapes, or for an inverted layer what is seen through its holes. */
+  paint: { color: string; emissive?: Emissive; normal: Vec3 };
+  /** Penumbra radius per unit distance from the layer (angular size of the sun disc). */
+  softness: number;
+  /** Sway in world units and its angular speed (leaves); omit for stone. */
+  wind?: { amplitude: number; speed: number };
 }
 
 export interface RoomData {
@@ -114,6 +130,12 @@ export interface RoomData {
   boxes: BoxDef[];
   blobs: BlobDef[];
   aperture: ApertureDef;
+  occluders: OccluderLayer[];
+  /**
+   * Anchor of the light landing-point handle (light direction = anchor - landing point).
+   * Defaults to the aperture center; low sun behind a far plane needs a lower anchor to land on screen.
+   */
+  lightAnchor?: Vec3;
   lamps: Vec3[];
 }
 
@@ -262,6 +284,7 @@ export const ROOM_DATA: RoomData = {
     { center: [-3.6, 1.36, 1.72], radius: 0.17, color: '#68ab5e', normal: [0.4, 0.8, -0.45], group: 'plant' },
   ],
   aperture: { axis: 0, at: -HALF_W, panes: windowPanes() },
+  occluders: [],
   lamps: [
     [-1.6, ROOM.height - 0.12, 3.0],
     [1.8, ROOM.height - 0.12, 3.0],
@@ -304,16 +327,24 @@ export function planeExtent(b: Bounds, plane: Plane): Rect {
 
 /* ------------------------------------------------------- aperture helpers */
 
-/** Shell plane an aperture lies on (the wall window or the canopy ceiling). */
-export const aperturePlane = (a: ApertureDef): Plane => (a.axis === 0 ? (a.at < 0 ? 'left' : 'right') : 'ceiling');
+/** Shell plane an aperture lies on. */
+export const aperturePlane = (a: ApertureDef): Plane => (a.axis === 0 ? (a.at < 0 ? 'left' : 'right') : a.axis === 1 ? 'ceiling' : 'back');
 
-/** Aperture-plane (u, v) to world space. */
-export const aperturePoint = (a: ApertureDef, u: number, v: number): Vec3 => (a.axis === 0 ? [a.at, v, u] : [u, a.at, v]);
+/** Plane (u, v) to world space. */
+export function planeUvPoint(p: PlaneDef, u: number, v: number): Vec3 {
+  if (p.axis === 0) return [p.at, v, u];
+  if (p.axis === 1) return [u, p.at, v];
+  return [u, v, p.at];
+}
 
-/** World point to aperture-plane (u, v). */
-export const apertureUv = (a: ApertureDef, p: Vec3): [number, number] => (a.axis === 0 ? [p[2], p[1]] : [p[0], p[2]]);
+/** World point to plane (u, v). */
+export function planeUv(p: PlaneDef, q: Vec3): Uv {
+  if (p.axis === 0) return [q[2], q[1]];
+  if (p.axis === 1) return [q[0], q[2]];
+  return [q[0], q[1]];
+}
 
-/** Panes clipped to the visible shell plane (a canopy mask can extend far beyond the shell). */
+/** Panes clipped to the visible shell plane (an opening can extend beyond the shell). */
 export function visiblePanes(room: RoomData): Rect[] {
   const [eu0, ev0, eu1, ev1] = planeExtent(room.bounds, aperturePlane(room.aperture));
   return room.aperture.panes
@@ -325,12 +356,16 @@ export function visiblePanes(room: RoomData): Rect[] {
 export function apertureCenter(room: RoomData): Vec3 {
   const panes = visiblePanes(room);
   const mean = (pick: (r: Rect) => number) => panes.reduce((s, r) => s + pick(r), 0) / panes.length;
-  return aperturePoint(room.aperture, mean((r) => (r[0] + r[2]) / 2), mean((r) => (r[1] + r[3]) / 2));
+  return planeUvPoint(room.aperture, mean((r) => (r[0] + r[2]) / 2), mean((r) => (r[1] + r[3]) / 2));
 }
+
+/** Point the landing-point handle hangs from. */
+export const lightAnchor = (room: RoomData): Vec3 => room.lightAnchor ?? apertureCenter(room);
 
 /** +1 or -1: which side of the aperture plane the inside of the scene is on. */
 export const apertureInward = (room: RoomData) => {
   const a = room.aperture;
-  const inside = a.axis === 0 ? 0 : room.bounds.height / 2;
+  const b = room.bounds;
+  const inside = [0, b.height / 2, (b.near + b.depth) / 2][a.axis];
   return Math.sign(inside - a.at);
 };

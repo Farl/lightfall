@@ -49,7 +49,7 @@ export class Pass {
       if (!u) continue;
       if (value instanceof WebGLTexture) {
         gl.activeTexture(gl.TEXTURE0 + unit);
-        gl.bindTexture(gl.TEXTURE_2D, value);
+        gl.bindTexture(u.type === gl.SAMPLER_2D_ARRAY ? gl.TEXTURE_2D_ARRAY : gl.TEXTURE_2D, value);
         gl.uniform1i(u.loc, unit++);
       } else {
         setUniform(gl, u, value);
@@ -108,12 +108,24 @@ export function uploadCanvas(gl: WebGL2RenderingContext, tex: WebGLTexture, sour
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
 }
 
-/** Upload a canvas and build its mip chain, for textures sampled at a chosen blur level (textureLod). */
-export function uploadMipmapped(gl: WebGL2RenderingContext, tex: WebGLTexture, source: HTMLCanvasElement) {
-  uploadCanvas(gl, tex, source);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  gl.generateMipmap(gl.TEXTURE_2D);
+/**
+ * Same-size canvases as the layers of one mipmapped 2D array texture, for textures sampled
+ * at a chosen blur level (textureLod). Rows stay in canvas order (no flip). An empty list
+ * uploads a single blank layer so the sampler is always complete.
+ */
+export function uploadLayers(gl: WebGL2RenderingContext, tex: WebGLTexture, sources: HTMLCanvasElement[], [w, h]: [number, number]) {
+  const target = gl.TEXTURE_2D_ARRAY;
+  gl.bindTexture(target, tex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
+  gl.texImage3D(target, 0, gl.RGBA8, w, h, Math.max(sources.length, 1), 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  sources.forEach((src, i) => gl.texSubImage3D(target, 0, 0, 0, i, w, h, 1, gl.RGBA, gl.UNSIGNED_BYTE, src));
+  gl.texParameteri(target, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(target, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(target, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(target, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.generateMipmap(target);
 }
 
 /** HDR (half float) target when the GPU can render to it, otherwise 8-bit. */
