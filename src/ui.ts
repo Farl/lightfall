@@ -43,6 +43,8 @@ export interface EditActions {
 export interface UiHandle {
   /** Re-sync every control and string from state and locale (after hotkeys or drag). */
   refresh(): void;
+  /** Re-sync only the time controls; cheap enough to run every frame while 播放 is on. */
+  refreshTime(): void;
 }
 
 export interface UiRoots {
@@ -75,7 +77,12 @@ const isSlider = (item: PanelItem): item is SliderKey => SLIDERS.some((s) => s.k
 
 export function buildUi(roots: UiRoots, state: AppState, actions: EditActions): UiHandle {
   const syncers: (() => void)[] = [];
-  const refresh = () => syncers.forEach((s) => s());
+  const timeSyncers: (() => void)[] = [];
+  const refreshTime = () => timeSyncers.forEach((s) => s());
+  const refresh = () => {
+    syncers.forEach((s) => s());
+    refreshTime();
+  };
 
   /* ---------------------------------------------------------------- helpers */
 
@@ -87,7 +94,7 @@ export function buildUi(roots: UiRoots, state: AppState, actions: EditActions): 
   const textEl = <K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text: Text) => bindText(el(tag, className), text);
   const bindAria = (e: HTMLElement, text: Text) => syncers.push(() => e.setAttribute('aria-label', t(text)));
 
-  const range = (key: SliderKey, className = 'range') => {
+  const range = (key: SliderKey, className = 'range', sync = syncers) => {
     const def = sliderDef(key);
     const input = el('input', className);
     input.type = 'range';
@@ -101,7 +108,7 @@ export function buildUi(roots: UiRoots, state: AppState, actions: EditActions): 
       if (key === 'time') state.lightOverride = null;
       value.textContent = def.format(state.sliders[key]);
     };
-    syncers.push(() => {
+    sync.push(() => {
       input.value = String(state.sliders[key]);
       value.textContent = def.format(state.sliders[key]);
     });
@@ -187,8 +194,17 @@ export function buildUi(roots: UiRoots, state: AppState, actions: EditActions): 
   /* --------------------------------------------------------------- time band */
 
   const timeHead = el('div', 'time-head');
-  const { input: timeInput, value: timeValue } = range('time', 'time-range');
+  const { input: timeInput, value: timeValue } = range('time', 'time-range', timeSyncers);
   timeValue.className = 'time-value';
+  const play = button('chip toggle-chip play');
+  play.onclick = () => {
+    state.playing = !state.playing;
+    refresh();
+  };
+  syncers.push(() => {
+    play.textContent = t(state.playing ? UI_TEXT.pausePlay : UI_TEXT.play);
+    play.setAttribute('aria-pressed', String(state.playing));
+  });
   const dayNight = el('div', 'day-night');
   for (const [label, hour] of [[UI_TEXT.day, DAY_HOTKEY_HOUR], [UI_TEXT.night, NIGHT_HOTKEY_HOUR]] as const) {
     const b = bindText(button('chip'), label);
@@ -198,7 +214,7 @@ export function buildUi(roots: UiRoots, state: AppState, actions: EditActions): 
     };
     dayNight.append(b);
   }
-  timeHead.append(textEl('span', 'time-label', UI_TEXT.time), timeValue, dayNight);
+  timeHead.append(textEl('span', 'time-label', UI_TEXT.time), timeValue, play, dayNight);
 
   const track = el('div', 'time-track');
   const def = sliderDef('time');
@@ -294,6 +310,7 @@ export function buildUi(roots: UiRoots, state: AppState, actions: EditActions): 
     else if (k === HOTKEYS.day) setTime(DAY_HOTKEY_HOUR);
     else if (k === HOTKEYS.night) setTime(NIGHT_HOTKEY_HOUR);
     else if (k === HOTKEYS.pause) toggle('animate');
+    else if (k === HOTKEYS.playTime) state.playing = !state.playing;
     else if (k === HOTKEYS.edit) toggle('edit');
     else if (k === HOTKEYS.geometry) toggle('geometry');
     else if (k === HOTKEYS.addBox) runEdit(actions.addBox);
@@ -305,5 +322,5 @@ export function buildUi(roots: UiRoots, state: AppState, actions: EditActions): 
   // Locale switches re-run every text syncer; the document title follows too.
   syncers.push(applyDocumentLocale);
   refresh();
-  return { refresh };
+  return { refresh, refreshTime };
 }
