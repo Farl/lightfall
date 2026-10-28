@@ -2,9 +2,13 @@
  * Time-of-day lighting state and the CPU mirror of the shader's sun-visibility test
  * (used for dust particles and the debug overlay; keep in sync with lighting.frag).
  */
-import { BOUNCE_GAIN, CELESTIAL, LAMP_LIGHT, TIME_KEYS, ATMOSPHERE, type TimeKey } from './config';
-import { add, clamp, deg, lerp, lerp3, normalize, scale, type Vec3 } from './math';
-import { windowCenter, type RoomData } from './scene/roomData';
+import { BOUNCE_GAIN, LAMP_LIGHT, TIME_KEYS, ATMOSPHERE, type TimeKey } from './config';
+import { add, clamp, deg, lerp, lerp3, normalize, scale, sub, type Vec3 } from './math';
+import { apertureCenter, apertureInward, apertureUv, type MaskDef, type RoomData } from './scene/roomData';
+import type { Celestial, SceneDef } from './scene/scenes';
+
+/** Leaf-gap coverage (0..1) at an aperture (u, v); supplied by SceneLayers from the mask texture. */
+export type MaskSampler = (u: number, v: number) => number;
 
 export interface LightingState {
   /** Unit vector pointing toward the light source (sun or moon). */
@@ -49,12 +53,12 @@ export function skyColorAt(hour: number): Vec3 {
   return lerp3(k.skyTop, k.skyBottom, 0.5).map((c) => Math.round(255 * Math.pow(clamp(c, 0, 1), 1 / 2.2))) as Vec3;
 }
 
-/** Sun by day, moon by night; both arc across the window from back-left to front-left. */
-export function celestialDirection(hour: number): Vec3 {
+/** Sun by day, moon by night; both arc from back-left to front-left. */
+export function celestialDirection(hour: number, celestial: Celestial): Vec3 {
   const h = ((hour % 24) + 24) % 24;
-  const { rise, set } = CELESTIAL;
+  const { rise, set } = celestial;
   const isDay = h >= rise && h < set;
-  const body = isDay ? CELESTIAL.sun : CELESTIAL.moon;
+  const body = isDay ? celestial.sun : celestial.moon;
   const span = isDay ? set - rise : 24 - (set - rise);
   const s = isDay ? (h - rise) / span : ((h - set + 24) % 24) / span;
   const elevation = deg(lerp(body.minElevation, body.maxElevation, Math.sin(Math.PI * s)));
@@ -62,32 +66,51 @@ export function celestialDirection(hour: number): Vec3 {
   return normalize([-Math.cos(elevation) * Math.cos(azimuth), Math.sin(elevation), -Math.cos(elevation) * Math.sin(azimuth)]);
 }
 
-export function lightingAt(hour: number, override: Vec3 | null): LightingState {
+/** @param hasLamps scenes without indoor lamps (outdoors) get no lamp tint in their fog. */
+export function lightingAt(hour: number, override: Vec3 | null, scene: SceneDef, hasLamps: boolean): LightingState {
   const k = sampleKeys(hour);
-  const toLight = override ?? celestialDirection(hour);
+  const toLight = override ?? celestialDirection(hour, scene.celestial);
   const lightColor = scale(k.sunColor, k.sunIntensity);
+  const lamps = hasLamps ? k.lamps : 0;
+  const ambientSky = scale(k.ambientSky, scene.ambientScale);
   return {
     toLight,
     lightColor,
-    ambientSky: k.ambientSky,
-    ambientGround: k.ambientGround,
+    ambientSky,
+    ambientGround: scale(k.ambientGround, scene.ambientScale),
     bounce: scale(lightColor, BOUNCE_GAIN * clamp(toLight[1], 0, 1)),
-    fogColor: add(scale(k.ambientSky, ATMOSPHERE.fogAmbientScale), scale(LAMP_LIGHT.color, k.lamps * BOUNCE_GAIN)),
+    fogColor: add(scale(ambientSky, ATMOSPHERE.fogAmbientScale), scale(LAMP_LIGHT.color, lamps * BOUNCE_GAIN)),
     skyTop: k.skyTop,
     skyBottom: k.skyBottom,
-    lamps: k.lamps,
+    lamps,
     tv: k.tv,
   };
 }
 
-/** Does a ray from `o` toward the light leave through a window pane without hitting a box? */
-export function lightVisible(o: Vec3, toLight: Vec3, room: RoomData): boolean {
-  if (toLight[0] > -1e-4) return false;
-  const t = (room.windowX - o[0]) / toLight[0];
-  if (t <= 0) return false;
-  const q = add(o, scale(toLight, t));
-  if (!room.panes.some((p) => q[2] >= p.zMin && q[2] <= p.zMax && q[1] >= p.yMin && q[1] <= p.yMax)) return false;
-  return !room.boxes.some((b) => rayHitsBox(o, toLight, t, b.min, b.max));
+/** Wind sway of the leaf mask at an aperture (u, v). Mirrors windOffset() in lighting.frag. */
+export function windOffset(mask: MaskDef, u: number, v: number, time: number): [number, number] {
+  const { amplitude: a, speed: s } = mask.wind;
+  return [a * Math.sin(time * s + v * 0.9), a * Math.cos(time * s * 0.83 + u * 0.7)];
+}
+
+/**
+ * Light reaching `o` (0..1): the ray toward the light must cross the aperture inside a pane,
+ * through a leaf gap if the aperture is masked, without hitting a box. Mirrors lightVisible()
+ * in lighting.frag, minus the distance blur of the mask (dust only needs a yes/no).
+ */
+export function lightVisible(o: Vec3, toLight: Vec3, room: RoomData, maskAt: MaskSampler | null = null, time = 0): number {
+  const a = room.aperture;
+  const t = (a.at - o[a.axis]) / toLight[a.axis];
+  if (!(t > 0) || !Number.isFinite(t)) return 0;
+  const [u, v] = apertureUv(a, add(o, scale(toLight, t)));
+  if (!a.panes.some(([u0, v0, u1, v1]) => u >= u0 && u <= u1 && v >= v0 && v <= v1)) return 0;
+  let m = 1;
+  if (a.mask && maskAt) {
+    const [du, dv] = windOffset(a.mask, u, v, time);
+    m = maskAt(u + du, v + dv);
+    if (m <= 0) return 0;
+  }
+  return room.boxes.some((b) => rayHitsBox(o, toLight, t, b.min, b.max)) ? 0 : m;
 }
 
 /** Slab test. Like the shader, a box containing the origin does not count (near must be > 0). */
@@ -109,15 +132,19 @@ function rayHitsBox(o: Vec3, d: Vec3, tMax: number, min: Vec3, max: Vec3): boole
   return near > 0;
 }
 
-/** Where the ray through the window center lands on the floor (the draggable 直射光落點). */
+/** Where the ray through the aperture center lands on the floor (the draggable 直射光落點). */
 export function landingPoint(room: RoomData, toLight: Vec3): Vec3 | null {
   if (toLight[1] <= 1e-4) return null;
-  const c = windowCenter(room);
+  const c = apertureCenter(room);
   return add(c, scale(toLight, -c[1] / toLight[1]));
 }
 
-/** Inverse of `landingPoint`: light direction that makes the window-center ray land at `p`. */
-export function directionToLanding(room: RoomData, p: Vec3): Vec3 {
-  const c = windowCenter(room);
-  return normalize([c[0] - p[0], c[1] - p[1], c[2] - p[2]]);
+/** Landing points closer to the aperture plane than this are refused (the light would graze it). */
+const LANDING_MARGIN = 0.2;
+
+/** Inverse of `landingPoint`: light direction that makes the center ray land at `p`, or null if `p` is not inside. */
+export function directionToLanding(room: RoomData, p: Vec3): Vec3 | null {
+  const a = room.aperture;
+  if ((p[a.axis] - a.at) * apertureInward(room) <= LANDING_MARGIN) return null;
+  return normalize(sub(apertureCenter(room), p));
 }

@@ -4,14 +4,15 @@
  *   lit scene --(downsample + H/V blur)--> blur (bloom + soft focus source)
  *   lit scene + blur + albedo --(final.frag @ output res)--> canvas
  */
-import { ATMOSPHERE, LAMP_LIGHT, OUTPUT_SCALE, PRESETS, RENDER, SCENE_RES, SKY_GAIN, TV_LIGHT, CAMERA } from '../config';
-import { DEPTH_RANGE, SCENE_CENTER } from '../camera';
+import { LAMP_LIGHT, OUTPUT_SCALE, PRESETS, RENDER, SCENE_RES, SKY_GAIN, TV_LIGHT, CAMERA } from '../config';
+import { depthRange, SCENE_CENTER } from '../camera';
 import type { LightingState } from '../lighting';
 import { scale } from '../math';
-import { ROOM, type RoomData } from '../scene/roomData';
+import type { RoomData } from '../scene/roomData';
 import type { SceneLayers } from '../scene/layers';
+import { atmosphereOf, type SceneDef } from '../scene/scenes';
 import type { AppState } from '../state';
-import { createTarget, createTexture, Pass, uploadCanvas, type RenderTarget } from './gl';
+import { createTarget, createTexture, Pass, uploadCanvas, uploadMipmapped, type RenderTarget } from './gl';
 import lightingSrc from './shaders/lighting.frag?raw';
 import blurSrc from './shaders/blur.frag?raw';
 import finalSrc from './shaders/final.frag?raw';
@@ -39,15 +40,18 @@ export class Renderer {
   private lighting: Pass;
   private blur: Pass;
   private final: Pass;
-  private tex: { albedo: WebGLTexture; depth: WebGLTexture; normal: WebGLTexture; emissive: WebGLTexture; dust: WebGLTexture };
+  private tex: { albedo: WebGLTexture; depth: WebGLTexture; normal: WebGLTexture; emissive: WebGLTexture; dust: WebGLTexture; mask: WebGLTexture };
+  /** SceneLayers.maskVersion last uploaded; the mip chain is rebuilt only when it changes. */
+  private maskVersion = -1;
+  private beamScale = 1;
   private lit: RenderTarget;
   private blurA: RenderTarget;
   private blurB: RenderTarget;
   private staticUniforms: Record<string, number | number[]>;
-  /** Uniforms derived from the (editable) room data; refreshed by setScene. */
+  /** Uniforms derived from the scene and its (editable) proxy data; refreshed by setScene. */
   private sceneUniforms: Record<string, number | number[]> = {};
 
-  constructor(canvas: HTMLCanvasElement, layers: SceneLayers, room: RoomData) {
+  constructor(canvas: HTMLCanvasElement, layers: SceneLayers, room: RoomData, scene: SceneDef) {
     canvas.width = this.outputSize.width;
     canvas.height = this.outputSize.height;
     const gl = canvas.getContext('webgl2', { antialias: false, premultipliedAlpha: false });
@@ -65,6 +69,7 @@ export class Renderer {
       normal: createTexture(gl, gl.NEAREST),
       emissive: createTexture(gl, gl.NEAREST),
       dust: createTexture(gl, gl.NEAREST),
+      mask: createTexture(gl, gl.LINEAR),
     };
 
     this.lit = createTarget(gl, SCENE_RES.width, SCENE_RES.height, gl.NEAREST, hdr);
@@ -77,28 +82,21 @@ export class Renderer {
       uRes: [SCENE_RES.width, SCENE_RES.height],
       uCenter: [...SCENE_CENTER],
       uCam: [CAMERA.x, CAMERA.y, CAMERA.dist, CAMERA.focal],
-      uDepthRange: [DEPTH_RANGE.far, DEPTH_RANGE.near],
-      uRoomNear: ROOM.near,
       uSunSoftness: RENDER.sunSoftness,
       uShadowSamples: RENDER.shadowSamples,
       uNormalBias: RENDER.normalBias,
       uBeamSteps: RENDER.beamSteps,
       uLampFalloff: LAMP_LIGHT.falloff,
       uTvFlicker: TV_LIGHT.flickerSpeed,
-      uShaftScale: ATMOSPHERE.shaftScale,
-      uShaftAmount: ATMOSPHERE.shaftAmount,
-      uFogDensity: ATMOSPHERE.fogDensity,
-      uFogHeightFalloff: ATMOSPHERE.fogHeightFalloff,
-      uFogDrift: ATMOSPHERE.fogDrift,
-      uDustLitGain: ATMOSPHERE.dustLitGain,
-      uDustAmbientGain: ATMOSPHERE.dustAmbientGain,
     };
-    this.setScene(layers, room);
+    this.setScene(layers, room, scene);
   }
 
-  /** Upload the painted layers and the proxy geometry. Call again after the room is edited. */
-  setScene(layers: SceneLayers, room: RoomData) {
-    if (room.panes.length > RENDER.maxPanes || room.boxes.length > RENDER.maxBoxes || room.lamps.length > RENDER.maxLamps) {
+  /** Upload the painted layers and the proxy geometry. Call again after an edit or a scene switch. */
+  setScene(layers: SceneLayers, room: RoomData, scene: SceneDef) {
+    const aperture = room.aperture;
+    const panes = aperture.panes;
+    if (panes.length > RENDER.maxPanes || room.boxes.length > RENDER.maxBoxes || room.lamps.length > RENDER.maxLamps) {
       throw new Error('Room data exceeds RENDER.max* shader array sizes');
     }
     const gl = this.gl;
@@ -106,13 +104,34 @@ export class Renderer {
     uploadCanvas(gl, this.tex.depth, layers.depth.canvas);
     uploadCanvas(gl, this.tex.normal, layers.normal.canvas);
     uploadCanvas(gl, this.tex.emissive, layers.emissive.canvas);
+    if (layers.mask && layers.maskVersion !== this.maskVersion) uploadMipmapped(gl, this.tex.mask, layers.mask);
+    this.maskVersion = layers.maskVersion;
 
-    const panes = room.panes;
+    this.beamScale = scene.beamScale;
+    const range = depthRange(room.bounds);
+    const atmosphere = atmosphereOf(scene);
+    const mask = aperture.mask;
     this.sceneUniforms = {
-      uWindowX: room.windowX,
+      uDepthRange: [range.far, range.near],
+      uRoomNear: room.bounds.near,
+      uApertureAxis: aperture.axis,
+      uApertureAt: aperture.at,
       uPaneCount: panes.length,
-      uPanes: flat(panes, (p) => [p.zMin, p.yMin, p.zMax, p.yMax]),
-      uSkyRange: [Math.min(...panes.map((p) => p.yMin)), Math.max(...panes.map((p) => p.yMax))],
+      uPanes: flat(panes, (p) => p),
+      // Sky seen through a wall window spans the panes' height; through a canopy it is the zenith.
+      uSkyRange: aperture.axis === 0 ? [Math.min(...panes.map((p) => p[1])), Math.max(...panes.map((p) => p[3]))] : [0, aperture.at],
+      uMaskOn: mask ? 1 : 0,
+      uMaskRect: mask?.rect ?? [0, 0, 1, 1],
+      uMaskSoftness: mask?.softness ?? 0,
+      uMaskTexelsPerUnit: mask ? mask.resolution[0] / (mask.rect[2] - mask.rect[0]) : 1,
+      uWind: mask ? [mask.wind.amplitude, mask.wind.speed] : [0, 0],
+      uShaftScale: atmosphere.shaftScale,
+      uShaftAmount: atmosphere.shaftAmount,
+      uFogDensity: atmosphere.fogDensity,
+      uFogHeightFalloff: atmosphere.fogHeightFalloff,
+      uFogDrift: atmosphere.fogDrift,
+      uDustLitGain: atmosphere.dustLitGain,
+      uDustAmbientGain: atmosphere.dustAmbientGain,
       uBoxCount: room.boxes.length,
       uBoxMin: flat(room.boxes, (b) => b.min),
       uBoxMax: flat(room.boxes, (b) => b.max),
@@ -139,6 +158,7 @@ export class Renderer {
         uNormal: this.tex.normal,
         uEmissive: this.tex.emissive,
         uDust: this.tex.dust,
+        uMask: this.tex.mask,
         uToLight: light.toLight,
         uLightColor: light.lightColor,
         uAmbientSky: light.ambientSky,
@@ -155,7 +175,7 @@ export class Renderer {
         uBeam: t.beam,
         uFog: t.fog,
         uDustOn: t.dust,
-        uBeamDensity: state.sliders.beamDensity,
+        uBeamDensity: state.sliders.beamDensity * this.beamScale,
         uView: VIEW_IDS[view],
       });
 

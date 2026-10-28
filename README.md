@@ -24,6 +24,7 @@ npm run dev
 | `1` `2` `3` | 原始 / 柔光調色 / 電影氣氛 |
 | `D` / `N` | 日間 09:00 / 夜間 01:30 |
 | `P` | 暫停動態空氣 |
+| 畫面下方「房間 / 樹林」 | 切換場景：窗戶照進房間，或從樹冠葉縫打下來的光束與光斑 |
 | `E` / 畫面下方「編輯」 | 編輯模式：拖曳黃色的「直射光落點」、點選拖曳家具、滾輪抬高（不必顯示幾何） |
 | `G` / 畫面下方「顯示幾何」 | 畫出代理幾何的線框、窗格與光線；和編輯各自獨立 |
 | `B` / `Delete` | 新增方塊 / 刪除選取的家具 |
@@ -53,7 +54,9 @@ security add-generic-password -U -a "$USER" -s atlascloud-api-key -w
 ```
 src/
   config.ts            所有可調參數：相機、渲染、時間關鍵影格、preset、UI 定義
-  scene/roomData.ts    房間的調色盤 + 代理幾何
+  scene/roomData.ts    房間的調色盤 + 代理幾何；場景資料型別（Bounds、Aperture、葉縫遮罩）
+  scene/forestData.ts  樹林場景：樹冠遮罩（葉縫）、樹幹、灌木
+  scene/scenes.ts      可切換的場景清單，與各自的太陽軌跡、環境光、霧
   scene/layers.ts      把代理幾何畫成 albedo / depth / normal / emissive 四張 Canvas
   scene/editing.ts     即時編輯代理幾何（選取、移動、抬高、新增、刪除）
   camera.ts            單點透視投影（shader 端的反投影與它對稱）
