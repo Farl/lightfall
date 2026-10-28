@@ -65,6 +65,7 @@ export const SCENES: Record<SceneKey, SceneDef> = {
   cloister: {
     label: { 'zh-TW': '迴廊', en: 'Cloister' },
     data: CLOISTER_DATA,
+    art: ART.cloisterAiAlbedo,
     // Sun over the courtyard on the left, high enough to throw the tracery onto the floor.
     celestial: { ...CELESTIAL, sun: { ...CELESTIAL.sun, minElevation: 22, maxElevation: 52 } },
     ambientScale: 0.75,
