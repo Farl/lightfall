@@ -247,6 +247,7 @@ export const HOTKEYS = {
   day: 'd',
   night: 'n',
   pause: 'p',
+  playTime: 't',
   edit: 'e',
   geometry: 'g',
   addBox: 'b',
@@ -269,7 +270,8 @@ export const PAGE = {
     ['1–3', { 'zh-TW': '預設', en: 'Presets' }],
     ['D', { 'zh-TW': '日間', en: 'Day' }],
     ['N', { 'zh-TW': '夜間', en: 'Night' }],
-    ['P', { 'zh-TW': '暫停動態', en: 'Pause' }],
+    ['T', { 'zh-TW': '播放時間', en: 'Play time' }],
+    ['P', { 'zh-TW': '暫停動態', en: 'Pause air' }],
     ['E', { 'zh-TW': '編輯', en: 'Edit' }],
     ['G', { 'zh-TW': '顯示幾何', en: 'Geometry' }],
     ['B', { 'zh-TW': '新增方塊', en: 'Add box' }],
@@ -284,6 +286,8 @@ export const UI_TEXT = {
   time: { 'zh-TW': '時間', en: 'Time' },
   day: { 'zh-TW': '日間', en: 'Day' },
   night: { 'zh-TW': '夜間', en: 'Night' },
+  play: { 'zh-TW': '播放', en: 'Play' },
+  pausePlay: { 'zh-TW': '暫停', en: 'Pause' },
   presets: { 'zh-TW': '預設', en: 'Preset' },
   view: { 'zh-TW': '檢視', en: 'View' },
   toolbar: { 'zh-TW': '場景與幾何資料', en: 'Scene and geometry' },
@@ -324,6 +328,9 @@ export const TOGGLE_AMOUNTS: Partial<Record<ToggleKey, SliderKey>> = {
 
 /** 24h sky band under the stage: gradient sampled from TIME_KEYS every `sampleStep` hours. */
 export const TIME_BAND = { sampleStep: 0.5, tickEvery: 3 };
+
+/** 播放 (play): how fast time advances, in hours per second (a full day in 24 / this seconds). */
+export const TIME_PLAY = { hoursPerSecond: 1 };
 
 /** Debug overlay: landing-point handle size in display pixels. */
 export const OVERLAY = { handleRadius: 9, label: { 'zh-TW': '直射光落點', en: 'Light landing point' } as Text, lineColor: 'rgba(255,255,255,0.55)', accent: '#ffd25e' };

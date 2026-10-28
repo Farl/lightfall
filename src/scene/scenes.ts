@@ -79,6 +79,6 @@ export const SCENES: Record<SceneKey, SceneDef> = {
 };
 
 export const SCENE_ORDER: SceneKey[] = ['room', 'forest', 'cloister'];
-export const DEFAULT_SCENE: SceneKey = 'room';
+export const DEFAULT_SCENE: SceneKey = 'cloister';
 
 export const atmosphereOf = (scene: SceneDef): Atmosphere => ({ ...ATMOSPHERE, ...scene.atmosphere });

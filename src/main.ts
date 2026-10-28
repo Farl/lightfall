@@ -2,7 +2,7 @@
  * Room Atmosphere 2D — a flat pixel-art room relit with fake 2.5D lighting.
  * See docs/technique.md for how the pieces fit together.
  */
-import { RENDER } from './config';
+import { RENDER, TIME_PLAY } from './config';
 import { DustField } from './dust';
 import { lightingAt } from './lighting';
 import { DebugOverlay } from './overlay';
@@ -55,7 +55,7 @@ function start() {
   });
   const select = (group: string | null) => (overlay.selected = group);
   const byId = (id: string) => document.getElementById(id)!;
-  buildUi({ header: byId('header'), toolbar: byId('stage-toolbar'), timeBand: byId('time-band'), panel: byId('panel'), shortcuts: byId('shortcuts') }, state, {
+  const ui = buildUi({ header: byId('header'), toolbar: byId('stage-toolbar'), timeBand: byId('time-band'), panel: byId('panel'), shortcuts: byId('shortcuts') }, state, {
     addBox: () => {
       select(addBox(room, RENDER.maxBoxes, sceneDef().boxSpawn));
       markDirty();
@@ -81,6 +81,11 @@ function start() {
     const dt = Math.min(MAX_FRAME_DT, (now - last) / 1000);
     last = now;
     if (state.toggles.animate) state.clock += dt;
+    if (state.playing) {
+      state.sliders.time = (state.sliders.time + dt * TIME_PLAY.hoursPerSecond) % 24;
+      state.lightOverride = null;
+      ui.refreshTime();
+    }
 
     if (state.scene !== builtScene) {
       resetRoom(room, sceneDef().data);
