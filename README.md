@@ -2,11 +2,11 @@
 
 把一張**平光的 2D 像素畫**，靠一份很輕量的 **2.5D 代理幾何**（光的開口、牆地平面、家具方盒、樹影與窗花剪影），即時算出從縫隙透進來的光：直射光與陰影、光束、浮塵、流動霧、柔焦、膠片顆粒、色散，並能切換日夜。三個場景：窗戶照進的房間、逆光穿過樹叢的樹林、窗花投影的哥德式迴廊。
 
-（原名 Room Atmosphere 2D；repo 與網址沿用舊名，避免既有連結失效。）
+（原名 Room Atmosphere 2D，舊網址 `farl.github.io/room-atmosphere-2d` 已不再使用。）
 
 靈感來自 [@vux429 的 Godot 橫捲貼文](https://www.threads.com/@vux429/post/De7EVP5GFse)。這裡用 WebGL2 + Canvas2D 重現同樣的思路，不用任何 3D 網格。
 
-**線上試玩：https://farl.github.io/room-atmosphere-2d/**
+**線上試玩：https://farl.github.io/lightfall/**
 
 技術拆解見 [docs/technique.md](docs/technique.md)。
 

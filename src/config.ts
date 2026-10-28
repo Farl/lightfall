@@ -18,7 +18,7 @@ export const I18N = {
   /** Browser languages starting with this prefix default to zh-TW. */
   zhPrefix: 'zh',
   queryParam: 'lang',
-  storageKey: 'room-atmosphere-2d:lang',
+  storageKey: 'lightfall:lang',
   /** Label of each locale on the language switch, written in that language. */
   names: { 'zh-TW': '中文', en: 'English' } as Text,
 };
@@ -265,7 +265,7 @@ export const PAGE = {
   referenceLabel: { 'zh-TW': '參考：@vux429 的 Threads 貼文', en: 'Reference: @vux429 on Threads' } as Text,
   referenceUrl: 'https://www.threads.com/@vux429/post/De7EVP5GFse',
   repoLabel: { 'zh-TW': 'GitHub 原始碼', en: 'Source on GitHub' } as Text,
-  repoUrl: 'https://github.com/Farl/room-atmosphere-2d',
+  repoUrl: 'https://github.com/Farl/lightfall',
   shortcuts: [
     ['1–3', { 'zh-TW': '預設', en: 'Presets' }],
     ['D', { 'zh-TW': '日間', en: 'Day' }],
