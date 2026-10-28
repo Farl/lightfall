@@ -24,7 +24,7 @@ npm run dev
 | `1` `2` `3` | 原始 / 柔光調色 / 電影氣氛 |
 | `D` / `N` | 日間 09:00 / 夜間 01:30 |
 | `P` | 暫停動態空氣 |
-| 畫面下方「房間 / 樹林」 | 切換場景：窗戶照進房間，或從樹冠葉縫打下來的光束與光斑 |
+| 畫面下方「房間 / 樹林 / 迴廊」 | 切換場景：窗戶照進房間、逆光穿過樹叢的光柱、從窗花投到地上的光影 |
 | `E` / 畫面下方「編輯」 | 編輯模式：拖曳黃色的「直射光落點」、點選拖曳家具、滾輪抬高（不必顯示幾何） |
 | `G` / 畫面下方「顯示幾何」 | 畫出代理幾何的線框、窗格與光線；和編輯各自獨立 |
 | `B` / `Delete` | 新增方塊 / 刪除選取的家具 |
@@ -33,12 +33,16 @@ npm run dev
 
 ## AI 重繪原圖
 
-`art/ai-albedo.png` 是把平光原圖 `art/flat-source.png` 交給 Atlas Cloud 的 `google/nano-banana-pro/edit` 重繪的結果：構圖不變、維持平光，光影仍然完全由代理幾何即時計算。面板上的「AI 原圖」可以切換回平光版本比較。
+`art/ai-albedo.png`（房間）與 `art/forest-ai-albedo.png`（樹林）是把各自的平光原圖（`art/flat-source.png`、`art/forest-flat-source.png`）交給 Atlas Cloud 的 `google/nano-banana-pro/edit` 重繪的結果：構圖不變、維持平光，光影仍然完全由代理幾何即時計算。面板上的「AI 原圖」可以切換回平光版本比較；迴廊目前沒有 AI 原圖。
 
-重新產生（每張約 US$0.14）：
+重新產生（每張約 US$0.14，參數是場景名稱）：
 
 ```bash
-node scripts/ai-repaint.mjs
+node scripts/ai-repaint.mjs room
+```
+
+```bash
+node scripts/ai-repaint.mjs forest
 ```
 
 API 金鑰從 macOS 鑰匙圈讀取（service 名稱 `atlascloud-api-key`），不會寫進任何檔案。第一次使用先存入：
@@ -54,9 +58,11 @@ security add-generic-password -U -a "$USER" -s atlascloud-api-key -w
 ```
 src/
   config.ts            所有可調參數：相機、渲染、時間關鍵影格、preset、UI 定義
-  scene/roomData.ts    房間的調色盤 + 代理幾何；場景資料型別（Bounds、Aperture、葉縫遮罩）
-  scene/forestData.ts  樹林場景：樹冠遮罩（葉縫）、樹幹、灌木
-  scene/scenes.ts      可切換的場景清單，與各自的太陽軌跡、環境光、霧
+  scene/roomData.ts    房間的調色盤 + 代理幾何；場景資料型別（Bounds、Aperture、OccluderLayer）
+  scene/forestData.ts  逆光樹林：遠中近三層樹影、灌木、天空
+  scene/cloisterData.ts 哥德式迴廊：尖拱開口與窗花兩層、柱墩
+  scene/shapes.ts      剪影圖層的形狀工具：樹、尖拱、圓窗；畫成多邊形與點陣化成遮擋貼圖
+  scene/scenes.ts      可切換的場景清單，與各自的太陽軌跡、環境光、霧、散射
   scene/layers.ts      把代理幾何畫成 albedo / depth / normal / emissive 四張 Canvas
   scene/editing.ts     即時編輯代理幾何（選取、移動、抬高、新增、刪除）
   camera.ts            單點透視投影（shader 端的反投影與它對稱）

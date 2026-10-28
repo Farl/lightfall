@@ -10,7 +10,7 @@ import { pointOnFloor, project } from './camera';
 import { t } from './i18n';
 import { directionToLanding, landingPoint } from './lighting';
 import { add, scale, type Vec2, type Vec3 } from './math';
-import { apertureCenter, aperturePoint, visiblePanes, type RoomData } from './scene/roomData';
+import { lightAnchor, planeExtent, planeUvPoint, aperturePlane, type PlaneDef, type Rect, type RoomData } from './scene/roomData';
 import { groupOf, liftDelta, moveGroup, pickGroup } from './scene/editing';
 
 export interface OverlayCallbacks {
@@ -124,14 +124,25 @@ export class DebugOverlay {
     }
     ctx.lineWidth = 1;
 
-    // Aperture panes (clipped to the shell) and, for plain windows, the rays from their corners
-    // down to the floor. A leaf mask has hundreds of gaps, so its outline alone is drawn.
+    const outline = (plane: PlaneDef, [u0, v0, u1, v1]: Rect) => {
+      const corners = [planeUvPoint(plane, u0, v0), planeUvPoint(plane, u1, v0), planeUvPoint(plane, u1, v1), planeUvPoint(plane, u0, v1)];
+      corners.forEach((c, i) => line(c, corners[(i + 1) % 4]));
+      return corners;
+    };
+
+    // Cut-out layers (their texture rect), then the aperture panes and, for panes that fit the
+    // shell (windows, not a whole far plane), the rays from their corners down to the floor.
+    ctx.setLineDash(DASH);
+    for (const layer of layers.geometry ? this.room.occluders : []) outline(layer, layer.rect);
+    ctx.setLineDash([]);
     ctx.strokeStyle = OVERLAY.accent;
     const aperture = this.room.aperture;
-    for (const [u0, v0, u1, v1] of layers.geometry ? visiblePanes(this.room) : []) {
-      const corners: Vec3[] = [aperturePoint(aperture, u0, v0), aperturePoint(aperture, u1, v0), aperturePoint(aperture, u1, v1), aperturePoint(aperture, u0, v1)];
-      corners.forEach((c, i) => line(c, corners[(i + 1) % 4]));
-      if (toLight[1] > 0 && !aperture.mask) {
+    const [eu0, ev0, eu1, ev1] = planeExtent(this.room.bounds, aperturePlane(aperture));
+    for (const pane of layers.geometry ? aperture.panes : []) {
+      const [u0, v0, u1, v1] = pane;
+      const corners = outline(aperture, [Math.max(u0, eu0), Math.max(v0, ev0), Math.min(u1, eu1), Math.min(v1, ev1)]);
+      const fits = u0 >= eu0 && v0 >= ev0 && u1 <= eu1 && v1 <= ev1;
+      if (toLight[1] > 0 && fits) {
         ctx.setLineDash(DASH);
         for (const c of corners) line(c, add(c, scale(toLight, -c[1] / toLight[1])));
         ctx.setLineDash([]);
@@ -145,7 +156,7 @@ export class DebugOverlay {
     if (!land) return;
     ctx.setLineDash(DASH);
     ctx.strokeStyle = OVERLAY.lineColor;
-    line(apertureCenter(this.room), land);
+    line(lightAnchor(this.room), land);
     ctx.setLineDash([]);
 
     const [hx, hy] = P(land);
